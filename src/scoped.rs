@@ -35,9 +35,16 @@
 
 #![macro_escape]
 
-pub use self::imp::TlsInner;
+pub use self::imp::KeyInner;
 
-pub struct Tls<T> { pub inner: TlsInner<T> }
+/// Type representing a TLS key corresponding to a reference to the type
+/// parameter `T`.
+///
+/// Keys are statically allocated and can contain a reference to an instance of
+/// type `T` scoped to a particular lifetime. Keys provides two methods, `set`
+/// and `with`, both of which currently use closures to control the scope of
+/// their contents.
+pub struct Key<T> { #[doc(hidden)] pub inner: KeyInner<T> }
 
 /// Declare a new scoped TLS key.
 ///
@@ -50,7 +57,7 @@ macro_rules! scoped_tls(
     );
 )
 
-impl<T: 'static> Tls<T> {
+impl<T: 'static> Key<T> {
     /// Insert a value into this scoped TLS slot for a duration of a closure.
     ///
     /// While `cb` is running, the value `t` will be returned by `get` unless
@@ -117,21 +124,23 @@ mod imp {
     use std::cell::UnsafeCell;
 
     // TODO: Should be a `Cell`, but that's not `Sync`
-    pub struct TlsInner<T> { pub inner: UnsafeCell<*mut T> }
+    #[doc(hidden)]
+    pub struct KeyInner<T> { pub inner: UnsafeCell<*mut T> }
 
     #[macro_export]
     macro_rules! scoped_tls_inner(
         (static $name:ident: $t:ty) => (
             #[thread_local]
-            static $name: ::tls::ScopedTls<$t> = ::tls::ScopedTls {
-                inner: ::tls::scoped::TlsInner {
+            static $name: ::tls::scoped::Key<$t> = ::tls::scoped::Key {
+                inner: ::tls::scoped::KeyInner {
                     inner: ::std::cell::UnsafeCell { value: 0 as *mut _ },
                 }
             };
         );
     )
 
-    impl<T> TlsInner<T> {
+    impl<T> KeyInner<T> {
+        #[doc(hidden)]
         pub fn set<R>(&'static self, t: &T, cb: || -> R) -> R {
             struct Reset<'a, T: 'a> {
                 key: &'a UnsafeCell<*mut T>,
@@ -154,6 +163,7 @@ mod imp {
             cb()
         }
 
+        #[doc(hidden)]
         pub fn with<R>(&'static self, cb: |Option<&T>| -> R) -> R {
             unsafe {
                 let ptr: *mut T = *self.inner.get();
@@ -171,18 +181,19 @@ mod imp {
 #[macro_escape]
 mod imp {
     use std::kinds::marker;
-    use os::StaticTls as OsStaticTls;
+    use os::StaticKey as OsStaticKey;
 
-    pub struct TlsInner<T> {
-        pub inner: OsStaticTls,
+    #[doc(hidden)]
+    pub struct KeyInner<T> {
+        pub inner: OsStaticKey,
         pub marker: marker::InvariantType<T>,
     }
 
     #[macro_export]
     macro_rules! scoped_tls(
         (static $name:ident: $t:ty) => (
-            static $name: ::tls::ScopedTls<$t> = ::tls::ScopedTls {
-                inner: ::tls::scoped::TlsInner {
+            static $name: ::tls::scoped::Key<$t> = ::tls::scoped::Key {
+                inner: ::tls::scoped::KeyInner {
                     inner: ::tls::os::INIT,
                     marker: ::std::kinds::marker::InvariantType,
                 }
@@ -190,10 +201,11 @@ mod imp {
         );
     )
 
-    impl<T> TlsInner<T> {
+    impl<T> KeyInner<T> {
+        #[doc(hidden)]
         pub fn set<R>(&'static self, t: &T, cb: || -> R) -> R {
             struct Reset<'a> {
-                key: &'a OsStaticTls,
+                key: &'a OsStaticKey,
                 val: *mut u8,
             }
             #[unsafe_destructor]
@@ -213,6 +225,7 @@ mod imp {
             cb()
         }
 
+        #[doc(hidden)]
         pub fn with<R>(&'static self, cb: |Option<&T>| -> R) -> R {
             unsafe {
                 let ptr = self.inner.get() as *mut T;
@@ -229,6 +242,8 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     #[test]
     fn smoke() {
         scoped_tls!(static BAR: uint)
@@ -243,6 +258,17 @@ mod tests {
         });
         BAR.with(|slot| {
             assert_eq!(slot, None);
+        });
+    }
+
+    #[test]
+    fn cell_allowed() {
+        scoped_tls!(static BAR: Cell<uint>)
+
+        BAR.set(&Cell::new(1), || {
+            BAR.with(|slot| {
+                assert_eq!(slot.map(|x| x.get()), Some(1));
+            });
         });
     }
 }
