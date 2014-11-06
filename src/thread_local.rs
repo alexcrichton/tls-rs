@@ -13,17 +13,17 @@ pub struct Tls<T> {
 macro_rules! tls(
     (static $name:ident: $t:ty = $init:expr) => (
         #[thread_local]
-        static $name: ::tls::StaticTls<$t> = ::tls::StaticTls {
-            inner: $init,
-            nc: ::std::kinds::marker::NoCopy,
-        };
+        static $name: ::tls::StaticTls<$t> = tls!($init);
     );
     (static mut $name:ident: $t:ty = $init:expr) => (
         #[thread_local]
-        static mut $name: ::tls::StaticTls<$t> = ::tls::StaticTls {
+        static mut $name: ::tls::StaticTls<$t> = tls!($init);
+    );
+    ($init:expr) => (
+        ::tls::StaticTls {
             inner: $init,
             nc: ::std::kinds::marker::NoCopy,
-        };
+        }
     );
 )
 
