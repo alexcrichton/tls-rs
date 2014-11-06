@@ -19,14 +19,14 @@
 //! scoped_tls!(static FOO: uint)
 //!
 //! // Initially each scoped TLS slot is empty.
-//! FOO.get(|slot| {
+//! FOO.with(|slot| {
 //!     assert_eq!(slot, None);
 //! });
 //!
 //! // When inserting a value into TLS, the value is only in place for the
 //! // duration of the closure specified.
 //! FOO.set(&1, || {
-//!     FOO.get(|slot| {
+//!     FOO.with(|slot| {
 //!         assert_eq!(slot.map(|x| *x), Some(1));
 //!     });
 //! });
@@ -35,30 +35,20 @@
 
 #![macro_escape]
 
-use super::StaticTls;
-use std::cell::UnsafeCell;
+pub use self::imp::TlsInner;
 
-pub struct Tls<T: 'static> {
-    pub inner: StaticTls<UnsafeCell<*mut T>>,
-}
+pub struct Tls<T> { pub inner: TlsInner<T> }
 
 /// Declare a new scoped TLS key.
 ///
-/// This macro declares a `static` item on which methods are used to get and set
-/// the TLS value stored within.
+/// This macro declares a `static` item on which methods are used to get and
+/// set the TLS value stored within.
 #[macro_export]
 macro_rules! scoped_tls(
     (static $name:ident: $t:ty) => (
-        static $name: ::tls::ScopedTls<$t> = ::tls::ScopedTls {
-            inner: tls!(::std::cell::UnsafeCell { value: 0 as *mut $t })
-        };
+        scoped_tls_inner!(static $name: $t)
     );
 )
-
-struct Reset<T: 'static> {
-    key: &'static StaticTls<UnsafeCell<*mut T>>,
-    val: *mut T,
-}
 
 impl<T: 'static> Tls<T> {
     /// Insert a value into this scoped TLS slot for a duration of a closure.
@@ -78,7 +68,7 @@ impl<T: 'static> Tls<T> {
     /// scoped_tls!(static FOO: uint)
     ///
     /// FOO.set(&100, || {
-    ///     let val = FOO.get(|v| *v.unwrap());
+    ///     let val = FOO.with(|v| *v.unwrap());
     ///     assert_eq!(val, 100);
     ///
     ///     // set can be called recursively
@@ -87,20 +77,13 @@ impl<T: 'static> Tls<T> {
     ///     });
     ///
     ///     // Recursive calls restore the previous value.
-    ///     let val = FOO.get(|v| *v.unwrap());
+    ///     let val = FOO.with(|v| *v.unwrap());
     ///     assert_eq!(val, 100);
     /// });
     /// # }
     /// ```
     pub fn set<R>(&'static self, t: &T, cb: || -> R) -> R {
-        let prev = unsafe {
-            let cell = self.inner.get();
-            let prev = *cell.get();
-            *cell.get() = t as *const T as *mut T;
-            prev
-        };
-        let _reset = Reset { key: &self.inner, val: prev };
-        cb()
+        self.inner.set(t, cb)
     }
 
     /// Get a value out of this scoped TLS variable.
@@ -117,32 +100,132 @@ impl<T: 'static> Tls<T> {
     /// # fn main() {
     /// scoped_tls!(static FOO: uint)
     ///
-    /// FOO.get(|slot| {
+    /// FOO.with(|slot| {
     ///     // work with `slot`
     /// });
     /// # }
     /// ```
-    pub fn get<R>(&'static self, cb: |Option<&T>| -> R) -> R {
-        unsafe {
-            let ptr: *mut T = self.inner.get().value;
-            if ptr.is_null() {
-                cb(None)
-            } else {
-                cb(Some(&*ptr))
+    pub fn with<R>(&'static self, cb: |Option<&T>| -> R) -> R {
+        self.inner.with(cb)
+    }
+}
+
+#[cfg(feature = "thread-local")]
+#[macro_escape]
+mod imp {
+
+    use std::cell::UnsafeCell;
+
+    // TODO: Should be a `Cell`, but that's not `Sync`
+    pub struct TlsInner<T> { pub inner: UnsafeCell<*mut T> }
+
+    #[macro_export]
+    macro_rules! scoped_tls_inner(
+        (static $name:ident: $t:ty) => (
+            #[thread_local]
+            static $name: ::tls::ScopedTls<$t> = ::tls::ScopedTls {
+                inner: ::tls::scoped::TlsInner {
+                    inner: ::std::cell::UnsafeCell { value: 0 as *mut _ },
+                }
+            };
+        );
+    )
+
+    impl<T> TlsInner<T> {
+        pub fn set<R>(&'static self, t: &T, cb: || -> R) -> R {
+            struct Reset<'a, T: 'a> {
+                key: &'a UnsafeCell<*mut T>,
+                val: *mut T,
+            }
+            #[unsafe_destructor]
+            impl<'a, T> Drop for Reset<'a, T> {
+                fn drop(&mut self) {
+                    unsafe { *self.key.get() = self.val; }
+                }
+            }
+
+            let prev = unsafe {
+                let prev = *self.inner.get();
+                *self.inner.get() = t as *const T as *mut T;
+                prev
+            };
+
+            let _reset = Reset { key: &self.inner, val: prev };
+            cb()
+        }
+
+        pub fn with<R>(&'static self, cb: |Option<&T>| -> R) -> R {
+            unsafe {
+                let ptr: *mut T = *self.inner.get();
+                if ptr.is_null() {
+                    cb(None)
+                } else {
+                    cb(Some(&*ptr))
+                }
             }
         }
     }
 }
 
+#[cfg(not(feature = "thread-local"))]
+#[macro_escape]
+mod imp {
+    use std::kinds::marker;
+    use os::StaticTls as OsStaticTls;
 
-#[unsafe_destructor]
-impl<T: 'static> Drop for Reset<T> {
-    fn drop(&mut self) {
-        unsafe {
-            *self.key.get().get() = self.val;
+    pub struct TlsInner<T> {
+        pub inner: OsStaticTls,
+        pub marker: marker::InvariantType<T>,
+    }
+
+    #[macro_export]
+    macro_rules! scoped_tls(
+        (static $name:ident: $t:ty) => (
+            static $name: ::tls::ScopedTls<$t> = ::tls::ScopedTls {
+                inner: ::tls::scoped::TlsInner {
+                    inner: ::tls::os::INIT,
+                    marker: ::std::kinds::marker::InvariantType,
+                }
+            };
+        );
+    )
+
+    impl<T> TlsInner<T> {
+        pub fn set<R>(&'static self, t: &T, cb: || -> R) -> R {
+            struct Reset<'a> {
+                key: &'a OsStaticTls,
+                val: *mut u8,
+            }
+            #[unsafe_destructor]
+            impl<'a> Drop for Reset<'a> {
+                fn drop(&mut self) {
+                    unsafe { self.key.set(self.val); }
+                }
+            }
+
+            let prev = unsafe {
+                let prev = self.inner.get();
+                self.inner.set(t as *const T as *mut u8);
+                prev
+            };
+
+            let _reset = Reset { key: &self.inner, val: prev };
+            cb()
+        }
+
+        pub fn with<R>(&'static self, cb: |Option<&T>| -> R) -> R {
+            unsafe {
+                let ptr = self.inner.get() as *mut T;
+                if ptr.is_null() {
+                    cb(None)
+                } else {
+                    cb(Some(&*ptr))
+                }
+            }
         }
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -150,15 +233,15 @@ mod tests {
     fn smoke() {
         scoped_tls!(static BAR: uint)
 
-        BAR.get(|slot| {
+        BAR.with(|slot| {
             assert_eq!(slot, None);
         });
         BAR.set(&1, || {
-            BAR.get(|slot| {
+            BAR.with(|slot| {
                 assert_eq!(slot.map(|x| *x), Some(1));
             });
         });
-        BAR.get(|slot| {
+        BAR.with(|slot| {
             assert_eq!(slot, None);
         });
     }

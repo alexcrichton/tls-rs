@@ -2,15 +2,10 @@
 
 extern crate libc;
 
-pub use statik::Tls as StaticTls;
 pub use scoped::Tls as ScopedTls;
 
-#[cfg(feature = "thread-local")] #[path = "thread_local.rs"] pub mod statik;
-#[cfg(not(feature = "thread-local"))] #[path = "fallback.rs"] pub mod statik;
-
-#[cfg(unix)] #[path = "unix.rs"] pub mod os;
-#[cfg(windows)] #[path = "windows.rs"] pub mod os;
-
+mod statik;
+pub mod os;
 pub mod scoped;
 
 pub struct Ref<T: 'static> { inner: &'static T }
@@ -28,5 +23,5 @@ impl<T> DerefMut<T> for RefMut<T> {
 
 // woohoo macro hygiene
 mod tls {
-    pub use {StaticTls, ScopedTls};
+    pub use {ScopedTls, os, scoped, Ref, RefMut};
 }
