@@ -9,6 +9,7 @@
 //  * the `statik` module does not support dynamic destruction
 //      * hm, ManuallyDrop seems like it would be... perfect here.
 //
+//  * scoped keys leak their TLS slots
 
 
 #![feature(macro_rules, unsafe_destructor)]
