@@ -54,7 +54,11 @@
 #![allow(non_camel_case_types)]
 
 use std::kinds::marker;
+use std::mem;
+use std::rt::exclusive::Exclusive;
+use std::rt;
 use std::sync::atomic::{mod, AtomicUint};
+use std::sync::{Once, ONCE_INIT};
 
 /// A type for TLS keys that are statically allocated.
 ///
@@ -107,7 +111,7 @@ pub struct StaticKey {
 /// drop(key); // deallocate this TLS slot.
 /// ```
 pub struct Key {
-    inner: StaticKey,
+    key: imp::Key,
 }
 
 /// Constant initialization value for static TLS keys.
@@ -115,6 +119,9 @@ pub const INIT: StaticKey = StaticKey {
     key: atomic::INIT_ATOMIC_UINT,
     nc: marker::NoCopy,
 };
+
+static INIT_KEYS: Once = ONCE_INIT;
+static mut KEYS: *mut Exclusive<Vec<imp::Key>> = 0 as *mut _;
 
 impl StaticKey {
     /// Gets the value associated with this TLS key
@@ -136,7 +143,7 @@ impl StaticKey {
     pub unsafe fn destroy(&self) {
         match self.key.swap(0, atomic::SeqCst) {
             0 => {}
-            n => imp::destroy(n as imp::Key),
+            n => { unregister_key(n as imp::Key); imp::destroy(n as imp::Key) }
         }
     }
 
@@ -152,7 +159,10 @@ impl StaticKey {
         assert!(key != 0);
         match self.key.compare_and_swap(0, key as uint, atomic::SeqCst) {
             // The CAS succeeded, so we've created the actual key
-            0 => key as uint,
+            0 => {
+                register_key(key);
+                key as uint
+            }
             // If someone beat us to the punch, use their key instead
             n => { imp::destroy(key); n }
         }
@@ -164,25 +174,54 @@ impl Key {
     ///
     /// This key will be deallocated when the key falls out of scope.
     pub fn new() -> Key {
-        Key {
-            inner: StaticKey {
-                key: AtomicUint::new(unsafe { imp::create() as uint }),
-                nc: marker::NoCopy
-            }
-        }
+        Key { key: unsafe { imp::create() } }
     }
 
     /// See StaticKey::get
-    pub fn get(&self) -> *mut u8 { unsafe { self.inner.get() } }
+    pub fn get(&self) -> *mut u8 {
+        unsafe { imp::get(self.key) }
+    }
 
     /// See StaticKey::set
-    pub fn set(&self, val: *mut u8) { unsafe { self.inner.set(val) } }
+    pub fn set(&self, val: *mut u8) {
+        unsafe { imp::set(self.key, val) }
+    }
 }
 
 impl Drop for Key {
     fn drop(&mut self) {
-        unsafe { self.inner.destroy() }
+        unsafe { imp::destroy(self.key) }
     }
+}
+
+fn init_keys() {
+    INIT_KEYS.doit(|| {
+        let keys = box Exclusive::new(Vec::<imp::Key>::new());
+        unsafe {
+            KEYS = mem::transmute(keys);
+        }
+
+        rt::at_exit(proc() unsafe {
+            let keys: Box<Exclusive<Vec<imp::Key>>> = mem::transmute(KEYS);
+            KEYS = 0 as *mut _;
+            let keys = keys.lock();
+            for key in keys.iter() {
+                imp::destroy(*key);
+            }
+        });
+    });
+}
+
+fn register_key(key: imp::Key) {
+    init_keys();
+    let mut keys = unsafe { (*KEYS).lock() };
+    keys.push(key);
+}
+
+fn unregister_key(key: imp::Key) {
+    init_keys();
+    let mut keys = unsafe { (*KEYS).lock() };
+    keys.retain(|k| *k != key);
 }
 
 #[cfg(unix)]
@@ -199,7 +238,7 @@ mod imp {
     }
 
     pub unsafe fn set(key: Key, value: *mut u8) {
-        assert_eq!(pthread_setspecific(key, value), 0);
+        debug_assert_eq!(pthread_setspecific(key, value), 0);
     }
 
     pub unsafe fn get(key: Key) -> *mut u8 {
@@ -207,7 +246,7 @@ mod imp {
     }
 
     pub unsafe fn destroy(key: Key) {
-        assert_eq!(pthread_key_delete(key), 0);
+        debug_assert_eq!(pthread_key_delete(key), 0);
     }
 
     #[cfg(target_os = "macos")]
@@ -246,7 +285,7 @@ mod imp {
     }
 
     pub unsafe fn destroy(key: Key) {
-        assert!(TlsFree(key) != 0);
+        debug_assert!(TlsFree(key) != 0);
     }
 
     extern "system" {
@@ -254,5 +293,43 @@ mod imp {
         fn TlsFree(dwTlsIndex: DWORD) -> BOOL;
         fn TlsGetValue(dwTlsIndex: DWORD) -> LPVOID;
         fn TlsSetValue(dwTlsIndex: DWORD, lpTlsvalue: LPVOID) -> BOOL;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Key, StaticKey, INIT};
+
+    fn assert_sync<T: Sync>() {}
+    fn assert_send<T: Send>() {}
+
+    #[test]
+    fn smoke() {
+        assert_sync::<Key>();
+        assert_send::<Key>();
+
+        let k1 = Key::new();
+        let k2 = Key::new();
+        assert!(k1.get().is_null());
+        assert!(k2.get().is_null());
+        k1.set(1 as *mut _);
+        k2.set(2 as *mut _);
+        assert_eq!(k1.get() as uint, 1);
+        assert_eq!(k2.get() as uint, 2);
+    }
+
+    #[test]
+    fn statik() {
+        static K1: StaticKey = INIT;
+        static K2: StaticKey = INIT;
+
+        unsafe {
+            assert!(K1.get().is_null());
+            assert!(K2.get().is_null());
+            K1.set(1 as *mut _);
+            K2.set(2 as *mut _);
+            assert_eq!(K1.get() as uint, 1);
+            assert_eq!(K2.get() as uint, 2);
+        }
     }
 }
