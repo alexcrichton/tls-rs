@@ -57,7 +57,7 @@ macro_rules! scoped_tls(
     );
 )
 
-impl<T: 'static> Key<T> {
+impl<T> Key<T> {
     /// Insert a value into this scoped TLS slot for a duration of a closure.
     ///
     /// While `cb` is running, the value `t` will be returned by `get` unless
