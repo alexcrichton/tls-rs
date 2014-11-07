@@ -1,9 +1,10 @@
 //! OS-based thread local storage
 //!
 //! This module provides an implementation of OS-based thread local storage,
-//! using the native OS-provided facilities. The interface of this differs from
-//! the other types of thread-local-storage provided in this crate in that
-//! OS-based TLS can only get/set pointers,
+//! using the native OS-provided facilities (think `TlsAlloc` or
+//! `pthread_setspecific`). The interface of this differs from the other types
+//! of thread-local-storage provided in this crate in that OS-based TLS can only
+//! get/set pointers,
 //!
 //! This modules also provides two flavors of TLS. One is intended for static
 //! initialization, and does not contain a `Drop` implementation to deallocate
@@ -63,6 +64,22 @@ use std::sync::atomic::{mod, AtomicUint};
 ///
 /// The actual OS-TLS key is lazily allocated when this is used for the first
 /// time.
+///
+/// # Example
+///
+/// ```
+/// use tls::os::{StaticKey, INIT};
+///
+/// static KEY: StaticKey = INIT;
+///
+/// unsafe {
+///     assert!(KEY.get().is_null());
+///     KEY.set(1 as *mut u8);
+///
+///     // static keys must be manually deallocated
+///     KEY.destroy();
+/// }
+/// ```
 pub struct StaticKey {
     key: AtomicUint,
     nc: marker::NoCopy,
@@ -76,6 +93,19 @@ pub struct StaticKey {
 ///
 /// Implementations will likely, however, contain unsafe code as this type only
 /// operates on `*mut u8`, an unsafe pointer.
+///
+/// # Example
+///
+/// ```rust
+/// use tls::os::Key;
+///
+/// let key = Key::new();
+/// assert!(key.get().is_null());
+/// key.set(1 as *mut u8);
+/// assert!(!key.get().is_null());
+///
+/// drop(key); // deallocate this TLS slot.
+/// ```
 pub struct Key {
     inner: StaticKey,
 }
