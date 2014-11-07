@@ -45,9 +45,6 @@
 //! unsafe {
 //!     assert!(KEY.get().is_null());
 //!     KEY.set(1 as *mut u8);
-//!
-//!     // static keys must be manually deallocated
-//!     KEY.destroy();
 //! }
 //! ```
 
@@ -62,12 +59,12 @@ use std::sync::{Once, ONCE_INIT};
 
 /// A type for TLS keys that are statically allocated.
 ///
-/// This type is entirely `unsafe` to use as it does not ensure that it is
-/// deallocated properly and it does not protect against use-after-deallocation
-/// or use-during-deallocation.
+/// This type is entirely `unsafe` to use as it does not protect against
+/// use-after-deallocation or use-during-deallocation.
 ///
 /// The actual OS-TLS key is lazily allocated when this is used for the first
-/// time.
+/// time. The key is also deallocated when the Rust runtime exits or `destroy`
+/// is called, whichever comes first.
 ///
 /// # Example
 ///
@@ -79,9 +76,6 @@ use std::sync::{Once, ONCE_INIT};
 /// unsafe {
 ///     assert!(KEY.get().is_null());
 ///     KEY.set(1 as *mut u8);
-///
-///     // static keys must be manually deallocated
-///     KEY.destroy();
 /// }
 /// ```
 pub struct StaticKey {

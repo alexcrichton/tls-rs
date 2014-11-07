@@ -8,6 +8,11 @@
 //  * the `statik` module does not support dynamic initialization
 //  * the `statik` module does not support dynamic destruction
 //      * hm, ManuallyDrop seems like it would be... perfect here.
+//
+// WISHLIST
+//
+// * #[thread_local] => static can be non-Sync
+// * ManuallyDrop
 
 
 #![feature(macro_rules, unsafe_destructor)]
