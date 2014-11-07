@@ -90,7 +90,25 @@ impl<T> Key<T> {
     /// # }
     /// ```
     pub fn set<R>(&'static self, t: &T, cb: || -> R) -> R {
-        self.inner.set(t, cb)
+        struct Reset<'a, T: 'a> {
+            key: &'a KeyInner<T>,
+            val: *mut T,
+        }
+        #[unsafe_destructor]
+        impl<'a, T> Drop for Reset<'a, T> {
+            fn drop(&mut self) {
+                unsafe { self.key.set(self.val) }
+            }
+        }
+
+        let prev = unsafe {
+            let prev = self.inner.get();
+            self.inner.set(t as *const T as *mut T);
+            prev
+        };
+
+        let _reset = Reset { key: &self.inner, val: prev };
+        cb()
     }
 
     /// Get a value out of this scoped TLS variable.
@@ -113,7 +131,14 @@ impl<T> Key<T> {
     /// # }
     /// ```
     pub fn with<R>(&'static self, cb: |Option<&T>| -> R) -> R {
-        self.inner.with(cb)
+        unsafe {
+            let ptr = self.inner.get();
+            if ptr.is_null() {
+                cb(None)
+            } else {
+                cb(Some(&*ptr))
+            }
+        }
     }
 }
 
@@ -141,39 +166,9 @@ mod imp {
 
     impl<T> KeyInner<T> {
         #[doc(hidden)]
-        pub fn set<R>(&'static self, t: &T, cb: || -> R) -> R {
-            struct Reset<'a, T: 'a> {
-                key: &'a UnsafeCell<*mut T>,
-                val: *mut T,
-            }
-            #[unsafe_destructor]
-            impl<'a, T> Drop for Reset<'a, T> {
-                fn drop(&mut self) {
-                    unsafe { *self.key.get() = self.val; }
-                }
-            }
-
-            let prev = unsafe {
-                let prev = *self.inner.get();
-                *self.inner.get() = t as *const T as *mut T;
-                prev
-            };
-
-            let _reset = Reset { key: &self.inner, val: prev };
-            cb()
-        }
-
+        pub unsafe fn set(&self, ptr: *mut T) { *self.inner.get() = ptr; }
         #[doc(hidden)]
-        pub fn with<R>(&'static self, cb: |Option<&T>| -> R) -> R {
-            unsafe {
-                let ptr: *mut T = *self.inner.get();
-                if ptr.is_null() {
-                    cb(None)
-                } else {
-                    cb(Some(&*ptr))
-                }
-            }
-        }
+        pub unsafe fn get(&self) -> *mut T { *self.inner.get() }
     }
 }
 
@@ -203,39 +198,9 @@ mod imp {
 
     impl<T> KeyInner<T> {
         #[doc(hidden)]
-        pub fn set<R>(&'static self, t: &T, cb: || -> R) -> R {
-            struct Reset<'a> {
-                key: &'a OsStaticKey,
-                val: *mut u8,
-            }
-            #[unsafe_destructor]
-            impl<'a> Drop for Reset<'a> {
-                fn drop(&mut self) {
-                    unsafe { self.key.set(self.val); }
-                }
-            }
-
-            let prev = unsafe {
-                let prev = self.inner.get();
-                self.inner.set(t as *const T as *mut u8);
-                prev
-            };
-
-            let _reset = Reset { key: &self.inner, val: prev };
-            cb()
-        }
-
+        pub unsafe fn set(&self, ptr: *mut T) { self.inner.set(ptr as *mut _) }
         #[doc(hidden)]
-        pub fn with<R>(&'static self, cb: |Option<&T>| -> R) -> R {
-            unsafe {
-                let ptr = self.inner.get() as *mut T;
-                if ptr.is_null() {
-                    cb(None)
-                } else {
-                    cb(Some(&*ptr))
-                }
-            }
-        }
+        pub unsafe fn get(&self) -> *mut T { self.inner.get() as *mut _ }
     }
 }
 
