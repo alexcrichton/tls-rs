@@ -28,7 +28,7 @@ scoped_tls!(static FOO: uint)
 
 fn main() {
     FOO.with(&1, || {
-        let foo_val = FOO.get(|x| *x.unwrap());
+        let foo_val = FOO.with(|x| *x.unwrap());
         println!("{}", foo_val);
     });
 }
