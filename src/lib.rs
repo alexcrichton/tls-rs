@@ -26,5 +26,5 @@ pub mod scoped;
 
 // woohoo macro hygiene
 mod tls {
-    pub use {os, scoped};
+    pub use {os, scoped, statik};
 }
