@@ -26,7 +26,7 @@
 //! ```rust
 //! use tls::os::Key;
 //!
-//! let key = Key::new();
+//! let key = Key::new(None);
 //! assert!(key.get().is_null());
 //! key.set(1 as *mut u8);
 //! assert!(!key.get().is_null());
@@ -79,6 +79,15 @@ use std::sync::{Once, ONCE_INIT};
 /// }
 /// ```
 pub struct StaticKey {
+    /// Inner static TLS key (internals), created with by `INIT_INNER` in this
+    /// module.
+    pub inner: StaticKeyInner,
+    /// Destructor for the TLS value.
+    pub dtor: Option<unsafe extern fn(*mut u8)>,
+}
+
+/// Inner contents of `StaticKey`, created by the `INIT_INNER` constant.
+pub struct StaticKeyInner {
     key: AtomicUint,
     nc: marker::NoCopy,
 }
@@ -97,7 +106,7 @@ pub struct StaticKey {
 /// ```rust
 /// use tls::os::Key;
 ///
-/// let key = Key::new();
+/// let key = Key::new(None);
 /// assert!(key.get().is_null());
 /// key.set(1 as *mut u8);
 /// assert!(!key.get().is_null());
@@ -109,7 +118,17 @@ pub struct Key {
 }
 
 /// Constant initialization value for static TLS keys.
+///
+/// This value specifies no destructor by default.
 pub const INIT: StaticKey = StaticKey {
+    inner: INIT_INNER,
+    dtor: None,
+};
+
+/// Constant initialization value for the inner part of static TLS keys.
+///
+/// This value allos specific configuration of the destructor for a TLS key.
+pub const INIT_INNER: StaticKeyInner = StaticKeyInner {
     key: atomic::INIT_ATOMIC_UINT,
     nc: marker::NoCopy,
 };
@@ -135,23 +154,23 @@ impl StaticKey {
     /// This function is unsafe as there is no guarantee that the key is not
     /// currently in use by other threads or will not ever be used again.
     pub unsafe fn destroy(&self) {
-        match self.key.swap(0, atomic::SeqCst) {
+        match self.inner.key.swap(0, atomic::SeqCst) {
             0 => {}
             n => { unregister_key(n as imp::Key); imp::destroy(n as imp::Key) }
         }
     }
 
     unsafe fn key(&self) -> imp::Key {
-        match self.key.load(atomic::SeqCst) {
+        match self.inner.key.load(atomic::SeqCst) {
             0 => self.lazy_init() as imp::Key,
             n => n as imp::Key
         }
     }
 
     unsafe fn lazy_init(&self) -> uint {
-        let key = imp::create();
+        let key = imp::create(self.dtor);
         assert!(key != 0);
-        match self.key.compare_and_swap(0, key as uint, atomic::SeqCst) {
+        match self.inner.key.compare_and_swap(0, key as uint, atomic::SeqCst) {
             // The CAS succeeded, so we've created the actual key
             0 => {
                 register_key(key);
@@ -167,8 +186,8 @@ impl Key {
     /// Create a new managed OS TLS key.
     ///
     /// This key will be deallocated when the key falls out of scope.
-    pub fn new() -> Key {
-        Key { key: unsafe { imp::create() } }
+    pub fn new(dtor: Option<unsafe extern fn(*mut u8)>) -> Key {
+        Key { key: unsafe { imp::create(dtor) } }
     }
 
     /// See StaticKey::get
@@ -221,13 +240,12 @@ fn unregister_key(key: imp::Key) {
 #[cfg(unix)]
 mod imp {
     use libc::c_int;
-    use std::ptr::null;
 
     pub type Key = pthread_key_t;
 
-    pub unsafe fn create() -> Key {
+    pub unsafe fn create(dtor: Option<unsafe extern fn(*mut u8)>) -> Key {
         let mut key = 0;
-        assert_eq!(pthread_key_create(&mut key, null()), 0);
+        assert_eq!(pthread_key_create(&mut key, dtor), 0);
         return key;
     }
 
@@ -250,7 +268,8 @@ mod imp {
     type pthread_key_t = ::libc::c_uint;
 
     extern {
-        fn pthread_key_create(key: *mut pthread_key_t, dtor: *const u8) -> c_int;
+        fn pthread_key_create(key: *mut pthread_key_t,
+                              dtor: Option<unsafe extern fn(*mut u8)>) -> c_int;
         fn pthread_key_delete(key: pthread_key_t) -> c_int;
         fn pthread_getspecific(key: pthread_key_t) -> *mut u8;
         fn pthread_setspecific(key: pthread_key_t, value: *mut u8) -> c_int;
@@ -263,7 +282,7 @@ mod imp {
 
     pub type Key = DWORD;
 
-    pub unsafe fn create() -> Key {
+    pub unsafe fn create(dtor: Option<unsafe extern fn(*mut u8)>) -> Key {
         const TLS_OUT_OF_INDEXES: DWORD = 0xFFFFFFFF;
         let key = TlsAlloc();
         assert!(key != TLS_OUT_OF_INDEXES);
@@ -292,7 +311,7 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
-    use super::{Key, StaticKey, INIT};
+    use super::{Key, StaticKey, INIT_INNER};
 
     fn assert_sync<T: Sync>() {}
     fn assert_send<T: Send>() {}
@@ -302,8 +321,8 @@ mod tests {
         assert_sync::<Key>();
         assert_send::<Key>();
 
-        let k1 = Key::new();
-        let k2 = Key::new();
+        let k1 = Key::new(None);
+        let k2 = Key::new(None);
         assert!(k1.get().is_null());
         assert!(k2.get().is_null());
         k1.set(1 as *mut _);
@@ -314,8 +333,8 @@ mod tests {
 
     #[test]
     fn statik() {
-        static K1: StaticKey = INIT;
-        static K2: StaticKey = INIT;
+        static K1: StaticKey = StaticKey { inner: INIT_INNER, dtor: None };
+        static K2: StaticKey = StaticKey { inner: INIT_INNER, dtor: None };
 
         unsafe {
             assert!(K1.get().is_null());

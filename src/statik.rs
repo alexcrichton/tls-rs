@@ -2,6 +2,7 @@
 #![allow(dead_code, missing_docs)]
 
 use std::kinds::marker;
+use std::ptr;
 
 pub use self::imp::Key;
 
@@ -46,6 +47,11 @@ impl<T> DerefMut<T> for RefMut<T> {
     fn deref_mut<'a>(&'a mut self) -> &'a mut T { &mut *self.inner }
 }
 
+#[doc(hidden)]
+pub unsafe extern fn destroy_value<T>(ptr: *mut u8) {
+    ptr::read(ptr as *const T);
+}
+
 #[cfg(feature = "thread-local")]
 mod imp {
     #![macro_escape]
@@ -53,7 +59,6 @@ mod imp {
     use std::cell::UnsafeCell;
     use std::intrinsics;
     use std::kinds::marker;
-    use std::ptr;
     use libc;
 
     use super::{Ref, RefMut};
@@ -103,12 +108,9 @@ mod imp {
                 return
             }
 
-            register_dtor::<T>(self.inner.get() as *mut u8, dtor::<T>);
+            register_dtor::<T>(self.inner.get() as *mut u8,
+                               super::destroy_value::<T>);
             *self.dtor_registered.get() = true;
-
-            unsafe extern fn dtor<T>(ptr: *mut u8) {
-                ptr::read(ptr as *const T);
-            }
         }
     }
 
@@ -141,26 +143,32 @@ mod imp {
     #[macro_export]
     macro_rules! tls(
         (static $name:ident: $t:ty = $init:expr) => (
-            static $name: ::tls::StaticKey<$t> = tls!($init);
+            static $name: ::tls::statik::Key<$t> = tls!($init, $t);
         );
         (static mut $name:ident: $t:ty = $init:expr) => (
-            static mut $name: ::tls::StaticKey<$t> = tls!($init);
+            static mut $name: ::tls::statik::Key<$t> = tls!($init, $t);
         );
-        ($init:expr) => (
-            ::tls::StaticKey {
-                inner: $init,
-                os: ::tls::os::INIT,
+        ($init:expr, $t:ty) => ({
+            unsafe extern fn __destroy(ptr: *mut u8) {
+                ::tls::statik::destroy_value::<$t>(ptr);
             }
-        );
+            ::tls::statik::Key {
+                inner: $init,
+                os: ::tls::os::StaticKey {
+                    inner: ::tls::os::INIT_INNER,
+                    dtor: Some(__destroy),
+                }
+            }
+        });
     )
 
     impl<T> Key<T> {
         pub fn get(&'static self) -> Ref<T> {
-            unsafe { Ref { inner: &*self.ptr() } }
+            unsafe { Ref::new(&*self.ptr()) }
         }
 
         pub fn get_mut(&'static self) -> RefMut<T> {
-            unsafe { RefMut { inner: &mut *self.ptr() } }
+            unsafe { RefMut::new(&mut *self.ptr()) }
         }
 
         unsafe fn ptr(&self) -> *mut T {
