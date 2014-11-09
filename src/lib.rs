@@ -2,9 +2,10 @@
 
 // TODO
 //  * the `statik` module does not support dynamic initialization
-//
 //  * for `statik`, think about failure in destructors
 //  * destructors for windows
+//  * application exit does not run pthread TLS dtors
+//  * re-initialize TLS slots after destruction
 //
 // WISHLIST
 //
@@ -18,7 +19,7 @@
 
 extern crate libc;
 
-mod statik;
+pub mod statik;
 pub mod os;
 pub mod scoped;
 

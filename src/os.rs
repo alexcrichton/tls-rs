@@ -208,31 +208,29 @@ impl Drop for Key {
 }
 
 fn init_keys() {
-    INIT_KEYS.doit(|| {
-        let keys = box Exclusive::new(Vec::<imp::Key>::new());
-        unsafe {
-            KEYS = mem::transmute(keys);
-        }
+    let keys = box Exclusive::new(Vec::<imp::Key>::new());
+    unsafe {
+        KEYS = mem::transmute(keys);
+    }
 
-        rt::at_exit(proc() unsafe {
-            let keys: Box<Exclusive<Vec<imp::Key>>> = mem::transmute(KEYS);
-            KEYS = 0 as *mut _;
-            let keys = keys.lock();
-            for key in keys.iter() {
-                imp::destroy(*key);
-            }
-        });
+    rt::at_exit(proc() unsafe {
+        let keys: Box<Exclusive<Vec<imp::Key>>> = mem::transmute(KEYS);
+        KEYS = 0 as *mut _;
+        let keys = keys.lock();
+        for key in keys.iter() {
+            imp::destroy(*key);
+        }
     });
 }
 
 fn register_key(key: imp::Key) {
-    init_keys();
+    INIT_KEYS.doit(init_keys);
     let mut keys = unsafe { (*KEYS).lock() };
     keys.push(key);
 }
 
 fn unregister_key(key: imp::Key) {
-    init_keys();
+    INIT_KEYS.doit(init_keys);
     let mut keys = unsafe { (*KEYS).lock() };
     keys.retain(|k| *k != key);
 }
