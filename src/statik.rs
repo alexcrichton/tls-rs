@@ -150,7 +150,8 @@ mod imp {
         );
         ($init:expr, $t:ty) => ({
             unsafe extern fn __destroy(ptr: *mut u8) {
-                ::tls::statik::destroy_value::<$t>(ptr);
+                let ptr = &ptr as *const _ as *mut u8;
+                ::tls::statik::destroy_value::<Box<$t>>(ptr);
             }
             ::tls::statik::Key {
                 inner: $init,
