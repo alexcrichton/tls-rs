@@ -262,7 +262,8 @@ mod imp {
     }
 
     pub unsafe fn set(key: Key, value: *mut u8) {
-        debug_assert_eq!(pthread_setspecific(key, value), 0);
+        let r = pthread_setspecific(key, value);
+        debug_assert_eq!(r, 0);
     }
 
     pub unsafe fn get(key: Key) -> *mut u8 {
@@ -270,7 +271,8 @@ mod imp {
     }
 
     pub unsafe fn destroy(key: Key) {
-        debug_assert_eq!(pthread_key_delete(key), 0);
+        let r = pthread_key_delete(key);
+        debug_assert_eq!(r, 0);
     }
 
     #[cfg(target_os = "macos")]
@@ -355,7 +357,8 @@ mod imp {
     }
 
     pub unsafe fn set(key: Key, value: *mut u8) {
-        assert!(TlsSetValue(key, value as LPVOID) != 0)
+        let r = TlsSetValue(key, value as LPVOID);
+        debug_assert!(r != 0);
     }
 
     pub unsafe fn get(key: Key) -> *mut u8 {
@@ -363,8 +366,25 @@ mod imp {
     }
 
     pub unsafe fn destroy(key: Key) {
-        unregister_dtor(key);
-        debug_assert!(TlsFree(key) != 0);
+        if unregister_dtor(key) {
+            // FIXME: Currently if a key has a destructor associated with it we
+            //        can't actually ever unregister it. If we were to
+            //        unregister it, then any key destruction would have to be
+            //        serialized with respect to actually running destructors.
+            //
+            //        We want to avoid a race where right before run_dtors runs
+            //        some destructors TlsFree is called. Allowing the call to
+            //        TlsFree would imply that the caller understands that *all
+            //        known threads* are not exiting, which is quite a difficult
+            //        thing to know!
+            //
+            //        For now we just leak all keys with dtors to "fix" this.
+            //        Note that source [2] above shows precedent for this sort
+            //        of strategy.
+        } else {
+            let r = TlsFree(key)
+            debug_assert!(r != 0);
+        }
     }
 
     extern "system" {
@@ -401,10 +421,12 @@ mod imp {
         dtors.push((key, dtor));
     }
 
-    unsafe fn unregister_dtor(key: Key) {
-        if DTORS.is_null() { return }
+    unsafe fn unregister_dtor(key: Key) -> bool {
+        if DTORS.is_null() { return false }
         let mut dtors = (*DTORS).lock();
+        let before = dtors.len();
         dtors.retain(|&(k, _)| k != key);
+        dtors.len() != before
     }
 
     // -------------------------------------------------------------------------
@@ -456,8 +478,6 @@ mod imp {
     //
     // It sure does! This seems to work for now, so maybe we'll just run into
     // that if we start linking with msvc?
-    //
-    // FIXME: wow this is racy with respect to destroying TLS keys
 
     #[link_section = ".CRT$XLB"]
     #[linkage = "extern"]
