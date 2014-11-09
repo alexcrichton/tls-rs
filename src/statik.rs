@@ -279,7 +279,7 @@ mod imp {
     // The disassembly of thread_local globals in C++ (at least produced by
     // clang) will have this show up in the output.
     #[cfg(target_os = "macos")]
-    unsafe fn register_dtor<T>(t: *mut u8, dtor: unsafe extern fn(*mut u8)) {
+    unsafe fn register_dtor(t: *mut u8, dtor: unsafe extern fn(*mut u8)) {
         extern {
             fn _tlv_atexit(dtor: unsafe extern fn(*mut u8),
                            arg: *mut u8);
