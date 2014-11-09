@@ -38,18 +38,19 @@ pub use self::imp::destroy_value;
 /// tls!(static FOO: UnsafeCell<uint> = UnsafeCell { value: 1 });
 ///
 /// unsafe {
-///     let f = FOO.get();
+///     let f = FOO.get().unwrap();
 ///     assert_eq!(*f.get(), 1);
 ///     *f.get() = 2;
 ///
 ///     // each thread starts out with the initial value of 1
 ///     spawn(proc() {
-///         assert_eq!(*FOO.get().get(), 1);
-///         *FOO.get().get() = 3;
+///         let f = FOO.get().unwrap();
+///         assert_eq!(*f.get(), 1);
+///         *f.get() = 3;
 ///     });
 ///
 ///     // we retain our original value of 2 despite the child thread
-///     assert_eq!(*FOO.get().get(), 2);
+///     assert_eq!(*FOO.get().unwrap().get(), 2);
 /// }
 /// # }
 /// ```
@@ -72,7 +73,10 @@ impl<T: 'static> Key<T> {
     ///
     /// This may lazily initialize an OS-based TLS key, or the value itself.
     /// This method in general is quite cheap to call, however.
-    pub fn get(&'static self) -> Ref<T> {
+    ///
+    /// This function will return `None` if the TLS value is currently being
+    /// destroyed, otherwise it will always return `Some`.
+    pub fn get(&'static self) -> Option<Ref<T>> {
         self.inner.get()
     }
 }
@@ -134,14 +138,13 @@ mod imp {
 
     #[doc(hidden)]
     impl<T> Key<T> {
-        pub fn get(&'static self) -> Ref<T> {
+        pub fn get(&'static self) -> Option<Ref<T>> {
             unsafe {
-                if *self.dtor_running.get() {
-                    panic!("cannot access a TLS variable after it has been \
-                            destroyed");
+                if intrinsics::needs_drop::<T>() && *self.dtor_running.get() {
+                    return None
                 }
                 self.register_dtor();
-                Ref::new(&*self.inner.get())
+                Some(Ref::new(&*self.inner.get()))
             }
         }
 
@@ -231,18 +234,19 @@ mod imp {
 
     #[doc(hidden)]
     impl<T> Key<T> {
-        pub fn get(&'static self) -> Ref<T> {
-            unsafe { Ref::new(&*self.ptr()) }
+        pub fn get(&'static self) -> Option<Ref<T>> {
+            unsafe {
+                self.ptr().map(|p| Ref::new(&*p))
+            }
         }
 
-        unsafe fn ptr(&'static self) -> *mut T {
+        unsafe fn ptr(&'static self) -> Option<*mut T> {
             let ptr = self.os.get() as *mut Value<T>;
             if !ptr.is_null() {
                 if ptr as uint == 1 {
-                    panic!("cannot access a TLS variable after it has been \
-                            destroyed");
+                    return None
                 }
-                return &mut (*ptr).value as *mut T;
+                return Some(&mut (*ptr).value as *mut T);
             }
 
             // If the lookup returned null, we haven't initialized our own local
@@ -253,7 +257,7 @@ mod imp {
             };
             let ptr: *mut Value<T> = mem::transmute(ptr);
             self.os.set(ptr as *mut u8);
-            &mut (*ptr).value as *mut T
+            Some(&mut (*ptr).value as *mut T)
         }
     }
 
@@ -270,6 +274,7 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use std::cell::UnsafeCell;
+    use std::rt::thread::Thread;
 
     struct Foo(Sender<()>);
 
@@ -285,16 +290,16 @@ mod tests {
         tls!(static FOO: UnsafeCell<int> = UnsafeCell { value: 1 })
 
         unsafe {
-            let f = FOO.get();
+            let f = FOO.get().unwrap();
             assert_eq!(*f.get(), 1);
             *f.get() = 2;
             let (tx, rx) = channel();
             spawn(proc() {
-                assert_eq!(*FOO.get().get(), 1);
+                assert_eq!(*FOO.get().unwrap().get(), 1);
                 tx.send(());
             });
             rx.recv();
-            assert_eq!(*FOO.get().get(), 2);
+            assert_eq!(*FOO.get().unwrap().get(), 2);
         }
     }
 
@@ -304,8 +309,57 @@ mod tests {
 
         let (tx, rx) = channel();
         spawn(proc() unsafe {
-            *FOO.get().get() = Some(Foo(tx));
+            *FOO.get().unwrap().get() = Some(Foo(tx));
         });
         rx.recv();
+    }
+
+    #[test]
+    fn circular() {
+        struct S1;
+        struct S2;
+        tls!(static K1: UnsafeCell<Option<S1>> = UnsafeCell { value: None })
+        tls!(static K2: UnsafeCell<Option<S2>> = UnsafeCell { value: None })
+
+        impl Drop for S1 {
+            fn drop(&mut self) {
+                unsafe {
+                    match K2.get() {
+                        Some(slot) => *slot.get() = Some(S2),
+                        None => {}
+                    }
+                }
+            }
+        }
+        impl Drop for S2 {
+            fn drop(&mut self) {
+                unsafe {
+                    match K1.get() {
+                        Some(slot) => *slot.get() = Some(S1),
+                        None => {}
+                    }
+                }
+            }
+        }
+
+        Thread::start(proc() {
+            drop((S1, S2));
+        }).join();
+    }
+
+    #[test]
+    fn self_referential() {
+        struct S1;
+        tls!(static K1: UnsafeCell<Option<S1>> = UnsafeCell { value: None })
+
+        impl Drop for S1 {
+            fn drop(&mut self) {
+                assert!(K1.get().is_none());
+            }
+        }
+
+        Thread::start(proc() unsafe {
+            *K1.get().unwrap().get() = Some(S1);
+        }).join();
     }
 }
