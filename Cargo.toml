@@ -6,3 +6,8 @@ authors = ["Alex Crichton <alex@alexcrichton.com>"]
 
 [features]
 thread-local = []
+
+[[test]]
+name = "circular"
+path = "tests/circular.rs"
+harness = false

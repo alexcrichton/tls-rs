@@ -3,10 +3,11 @@
 #![macro_escape]
 
 use std::kinds::marker;
-use std::ptr;
 
 #[doc(hidden)]
 pub use self::imp::Key as KeyInner;
+#[doc(hidden)]
+pub use self::imp::destroy_value;
 
 /// A TLS key which owns its contents.
 ///
@@ -90,11 +91,6 @@ impl<T> Deref<T> for Ref<T> {
     fn deref<'a>(&'a self) -> &'a T { self.inner }
 }
 
-#[doc(hidden)]
-pub unsafe extern fn destroy_value<T>(ptr: *mut u8) {
-    ptr::read(ptr as *const T);
-}
-
 #[cfg(feature = "thread-local")]
 mod imp {
     #![macro_escape]
@@ -102,6 +98,7 @@ mod imp {
     use std::cell::UnsafeCell;
     use std::intrinsics;
     use std::kinds::marker;
+    use std::ptr;
     use libc;
 
     use super::Ref;
@@ -109,7 +106,8 @@ mod imp {
     #[doc(hidden)]
     pub struct Key<T> {
         pub inner: UnsafeCell<T>,
-        pub dtor_registered: UnsafeCell<bool>,
+        pub dtor_registered: UnsafeCell<bool>, // should be Cell
+        pub dtor_running: UnsafeCell<bool>,
         pub nc: marker::NoCopy,
     }
 
@@ -129,6 +127,7 @@ mod imp {
                     inner: ::std::cell::UnsafeCell { value: $init },
                     nc: ::std::kinds::marker::NoCopy,
                     dtor_registered: ::std::cell::UnsafeCell { value: false },
+                    dtor_running: ::std::cell::UnsafeCell { value: false },
                 },
             }
         );
@@ -138,6 +137,10 @@ mod imp {
     impl<T> Key<T> {
         pub fn get(&'static self) -> Ref<T> {
             unsafe {
+                if *self.dtor_running.get() {
+                    panic!("cannot access a TLS variable after it has been \
+                            destroyed");
+                }
                 self.register_dtor();
                 Ref::new(&*self.inner.get())
             }
@@ -148,8 +151,8 @@ mod imp {
                 return
             }
 
-            register_dtor::<T>(self.inner.get() as *mut u8,
-                               super::destroy_value::<T>);
+            register_dtor::<T>(self as *const _ as *mut u8,
+                               destroy_value::<T>);
             *self.dtor_registered.get() = true;
         }
     }
@@ -163,6 +166,13 @@ mod imp {
                                         -> libc::c_int;
         }
         __cxa_thread_atexit_impl(dtor, t, __dso_handle);
+    }
+
+    #[doc(hidden)]
+    pub unsafe extern fn destroy_value<T>(ptr: *mut u8) {
+        let ptr = ptr as *mut Key<T>;
+        *(*ptr).dtor_running.get() = true;
+        ptr::read((*ptr).inner.get() as *const T);
     }
 }
 
@@ -181,6 +191,11 @@ mod imp {
         pub os: OsStaticKey,
     }
 
+    struct Value<T> {
+        key: &'static OsStaticKey,
+        value: T,
+    }
+
     #[macro_export]
     macro_rules! tls(
         (static $name:ident: $t:ty = $init:expr) => (
@@ -191,8 +206,7 @@ mod imp {
         );
         ($init:expr, $t:ty) => ({
             unsafe extern fn __destroy(ptr: *mut u8) {
-                let ptr = &ptr as *const _ as *mut u8;
-                ::tls::statik::destroy_value::<Box<$t>>(ptr);
+                ::tls::statik::destroy_value::<$t>(ptr);
             }
             ::tls::statik::Key {
                 inner: ::tls::statik::KeyInner {
@@ -212,19 +226,35 @@ mod imp {
             unsafe { Ref::new(&*self.ptr()) }
         }
 
-        unsafe fn ptr(&self) -> *mut T {
-            let ptr = self.os.get();
+        unsafe fn ptr(&'static self) -> *mut T {
+            let ptr = self.os.get() as *mut Value<T>;
             if !ptr.is_null() {
-                return ptr as *mut T
+                if ptr as uint == 1 {
+                    panic!("cannot access a TLS variable after it has been \
+                            destroyed");
+                }
+                return &mut (*ptr).value as *mut T;
             }
 
             // If the lookup returned null, we haven't initialized our own local
             // copy, so do that now.
-            let value: Box<T> = box mem::transmute_copy(&self.inner);
-            let value: *mut T = mem::transmute(value);
-            self.os.set(value as *mut u8);
-            value as *mut T
+            let ptr: Box<Value<T>> = box Value {
+                key: &self.os,
+                value: mem::transmute_copy(&self.inner),
+            };
+            let ptr: *mut Value<T> = mem::transmute(ptr);
+            self.os.set(ptr as *mut u8);
+            &mut (*ptr).value as *mut T
         }
+    }
+
+    #[doc(hidden)]
+    pub unsafe extern fn destroy_value<T>(ptr: *mut u8) {
+        let ptr: Box<Value<T>> = mem::transmute(ptr);
+        let key = ptr.key;
+        key.set(1 as *mut _);
+        drop(ptr);
+        key.set(0 as *mut _);
     }
 }
 

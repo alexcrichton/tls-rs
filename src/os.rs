@@ -83,6 +83,9 @@ pub struct StaticKey {
     /// module.
     pub inner: StaticKeyInner,
     /// Destructor for the TLS value.
+    ///
+    /// See `Key::new` for information about when the destructor runs and how
+    /// it runs.
     pub dtor: Option<unsafe extern fn(*mut u8)>,
 }
 
@@ -153,6 +156,9 @@ impl StaticKey {
     ///
     /// This function is unsafe as there is no guarantee that the key is not
     /// currently in use by other threads or will not ever be used again.
+    ///
+    /// Note that this does *not* run the user-provided destructor if one was
+    /// specified at definition time. Doing so must be done manually.
     pub unsafe fn destroy(&self) {
         match self.inner.key.swap(0, atomic::SeqCst) {
             0 => {}
@@ -186,6 +192,14 @@ impl Key {
     /// Create a new managed OS TLS key.
     ///
     /// This key will be deallocated when the key falls out of scope.
+    ///
+    /// The argument provided is an optionally-specified destructor for the
+    /// value of this TLS key. When a thread exits and the value for this key
+    /// is non-null the destructor will be invoked. The TLS value will be reset
+    /// to null before the destructor is invoked.
+    ///
+    /// Note that the destructor will not be run when the `Key` goes out of
+    /// scope.
     pub fn new(dtor: Option<unsafe extern fn(*mut u8)>) -> Key {
         Key { key: unsafe { imp::create(dtor) } }
     }
