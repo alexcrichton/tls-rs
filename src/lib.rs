@@ -20,8 +20,9 @@ extern crate libc;
 pub mod statik;
 pub mod os;
 pub mod scoped;
+pub mod dynamic;
 
 // woohoo macro hygiene
 mod tls {
-    pub use {os, scoped, statik};
+    pub use {os, scoped, statik, dynamic};
 }

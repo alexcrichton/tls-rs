@@ -1,4 +1,51 @@
-//! Owning TLS
+//! Statically initialized, owning TLS
+//!
+//! This module implements a "flavor" of TLS where the TLS slot owns the data
+//! that it contains. All contents, however, must be statically initialized. Any
+//! value which does not contain references is permitted inside a key of this
+//! type. This means that owning TLS keys also allow for content with
+//! destructors.
+//!
+//! The destructor for TLS values will run when the thread exits. There are some
+//! nuances about destructors, however:
+//!
+//! * A TLS key cannot be accessed while its destructor is running.
+//! * A TLS key may not be accessible after its destructor has run.
+//! * Repeately setting TLS keys during destruction may cause memory leaks.
+//!
+//! It is generally recommended to avoid TLS from destructors themselves, and if
+//! required only doing so in a deterministic, non-cyclic fashion.
+//!
+//! This form of TLS will also attempt to select the "fastest" implementation of
+//! TLS available for the target platform.
+//!
+//! # Example
+//!
+//! ```
+//! # #![feature(phase)]
+//! # #[phase(plugin, link)] extern crate tls;
+//! # fn main() {
+//! use std::cell::UnsafeCell;
+//!
+//! tls!(static FOO: UnsafeCell<uint> = UnsafeCell { value: 1 });
+//!
+//! unsafe {
+//!     let f = FOO.get().unwrap();
+//!     assert_eq!(*f.get(), 1);
+//!     *f.get() = 2;
+//!
+//!     // each thread starts out with the initial value of 1
+//!     spawn(proc() {
+//!         let f = FOO.get().unwrap();
+//!         assert_eq!(*f.get(), 1);
+//!         *f.get() = 3;
+//!     });
+//!
+//!     // we retain our original value of 2 despite the child thread
+//!     assert_eq!(*FOO.get().unwrap().get(), 2);
+//! }
+//! # }
+//! ```
 
 #![macro_escape]
 
@@ -71,11 +118,12 @@ pub struct Ref<T: 'static> {
 impl<T: 'static> Key<T> {
     /// Acquire a reference to the value in this TLS key.
     ///
-    /// This may lazily initialize an OS-based TLS key, or the value itself.
-    /// This method in general is quite cheap to call, however.
+    /// This may lazily initializes an OS-based TLS key. This method in general
+    /// is quite cheap to call, however.
     ///
     /// This function will return `None` if the TLS value is currently being
-    /// destroyed, otherwise it will always return `Some`.
+    /// destroyed, and it may also return `None` after the key has been
+    /// destroyed.
     pub fn get(&'static self) -> Option<Ref<T>> {
         self.inner.get()
     }
@@ -131,10 +179,6 @@ mod imp {
             #[thread_local]
             static $name: ::tls::statik::Key<$t> = tls!($init, $t);
         );
-        (static mut $name:ident: $t:ty = $init:expr) => (
-            #[thread_local]
-            static mut $name: ::tls::statik::Key<$t> = tls!($init, $t);
-        );
         ($init:expr, $t:ty) => (
             ::tls::statik::Key {
                 inner: ::tls::statik::KeyInner {
@@ -164,8 +208,8 @@ mod imp {
                 return
             }
 
-            register_dtor::<T>(self as *const _ as *mut u8,
-                               destroy_value::<T>);
+            register_dtor(self as *const _ as *mut u8,
+                          destroy_value::<T>);
             *self.dtor_registered.get() = true;
         }
     }
@@ -177,8 +221,10 @@ mod imp {
     // Note, however, that we run on lots older linuxes, as well as cross
     // compiling from a newer linux to an older linux, so we also have a
     // fallback implementation to use as well.
+    //
+    // Due to rust-lang/rust#18804, make sure this is not generic!
     #[cfg(target_os = "linux")]
-    unsafe fn register_dtor<T>(t: *mut u8, dtor: unsafe extern fn(*mut u8)) {
+    unsafe fn register_dtor(t: *mut u8, dtor: unsafe extern fn(*mut u8)) {
         use std::mem;
         use os;
         use libc;
@@ -187,12 +233,12 @@ mod imp {
             #[linkage = "extern_weak"]
             static __cxa_thread_atexit_impl: *const ();
         }
-        if !__cxa_thread_atexit_impl.is_null() && false {
+        if !__cxa_thread_atexit_impl.is_null() {
             type F = unsafe extern fn(dtor: unsafe extern fn(*mut u8),
                                       arg: *mut u8,
                                       dso_handle: *mut u8) -> libc::c_int;
-            let f = mem::transmute::<_, F>(__cxa_thread_atexit_impl);
-            f(dtor, t, __dso_handle);
+            mem::transmute::<*const (), F>(__cxa_thread_atexit_impl)
+            (dtor, t, __dso_handle);
             return
         }
 
@@ -265,10 +311,11 @@ mod imp {
     pub struct Key<T> {
         pub inner: T,
         pub os: OsStaticKey,
+        pub valid: OsStaticKey,
     }
 
-    struct Value<T> {
-        key: &'static OsStaticKey,
+    struct Value<T: 'static> {
+        key: &'static Key<T>,
         value: T,
     }
 
@@ -276,9 +323,6 @@ mod imp {
     macro_rules! tls(
         (static $name:ident: $t:ty = $init:expr) => (
             static $name: ::tls::statik::Key<$t> = tls!($init, $t);
-        );
-        (static mut $name:ident: $t:ty = $init:expr) => (
-            static mut $name: ::tls::statik::Key<$t> = tls!($init, $t);
         );
         ($init:expr, $t:ty) => ({
             unsafe extern fn __destroy(ptr: *mut u8) {
@@ -291,6 +335,7 @@ mod imp {
                         inner: ::tls::os::INIT_INNER,
                         dtor: Some(__destroy),
                     },
+                    valid: ::tls::os::INIT,
                 },
             }
         });
@@ -315,8 +360,12 @@ mod imp {
 
             // If the lookup returned null, we haven't initialized our own local
             // copy, so do that now.
+            //
+            // Also note that this transmute_copy should be ok because the value
+            // `inner` is already validated to be a valid `static` value, so we
+            // should be able to freely copy the bits.
             let ptr: Box<Value<T>> = box Value {
-                key: &self.os,
+                key: self,
                 value: mem::transmute_copy(&self.inner),
             };
             let ptr: *mut Value<T> = mem::transmute(ptr);
@@ -326,7 +375,7 @@ mod imp {
     }
 
     #[doc(hidden)]
-    pub unsafe extern fn destroy_value<T>(ptr: *mut u8) {
+    pub unsafe extern fn destroy_value<T: 'static>(ptr: *mut u8) {
         // The OS TLS ensures that this key contains a NULL value when this
         // destructor starts to run. We set it back to a sentinel value of 1 to
         // ensure that any future calls to `get` for this thread will return
@@ -336,9 +385,9 @@ mod imp {
         // before we return from the destructor ourselves.
         let ptr: Box<Value<T>> = mem::transmute(ptr);
         let key = ptr.key;
-        key.set(1 as *mut _);
+        key.os.set(1 as *mut u8);
         drop(ptr);
-        key.set(0 as *mut _);
+        key.os.set(0 as *mut u8);
     }
 }
 
@@ -391,13 +440,21 @@ mod tests {
         struct S2;
         tls!(static K1: UnsafeCell<Option<S1>> = UnsafeCell { value: None })
         tls!(static K2: UnsafeCell<Option<S2>> = UnsafeCell { value: None })
+        static mut HITS: uint = 0;
 
         impl Drop for S1 {
             fn drop(&mut self) {
                 unsafe {
+                    HITS += 1;
                     match K2.get() {
-                        Some(slot) => *slot.get() = Some(S2),
-                        None => {}
+                        Some(slot) => {
+                            if HITS == 1 {
+                                *slot.get() = Some(S2);
+                            } else {
+                                assert_eq!(HITS, 3);
+                            }
+                        }
+                        None => assert_eq!(HITS, 3),
                     }
                 }
             }
@@ -405,16 +462,20 @@ mod tests {
         impl Drop for S2 {
             fn drop(&mut self) {
                 unsafe {
+                    HITS += 1;
                     match K1.get() {
-                        Some(slot) => *slot.get() = Some(S1),
-                        None => {}
+                        Some(slot) => {
+                            assert_eq!(HITS, 2);
+                            *slot.get() = Some(S1);
+                        }
+                        None => unreachable!(),
                     }
                 }
             }
         }
 
         Thread::start(proc() {
-            drop((S1, S2));
+            drop(S1);
         }).join();
     }
 
