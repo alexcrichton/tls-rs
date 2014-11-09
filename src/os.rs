@@ -382,7 +382,7 @@ mod imp {
             //        Note that source [2] above shows precedent for this sort
             //        of strategy.
         } else {
-            let r = TlsFree(key)
+            let r = TlsFree(key);
             debug_assert!(r != 0);
         }
     }
