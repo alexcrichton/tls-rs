@@ -108,9 +108,20 @@ mod imp {
 
     #[doc(hidden)]
     pub struct Key<T> {
+        // Place the inner bits in an `UnsafeCell` to currently get around the
+        // "only Sync statics" restriction. This allows any type to be placed in
+        // the cell.
+        //
+        // Note that all access required `T: 'static` so it can't be a type with
+        // any borrowed pointers still.
         pub inner: UnsafeCell<T>,
+
+        // Metadata to keep track of the state of the destructor. Remember that
+        // these variables are thread-local, not global.
         pub dtor_registered: UnsafeCell<bool>, // should be Cell
-        pub dtor_running: UnsafeCell<bool>,
+        pub dtor_running: UnsafeCell<bool>, // should be Cell
+
+        // These shouldn't be copied around.
         pub nc: marker::NoCopy,
     }
 
@@ -118,13 +129,13 @@ mod imp {
     macro_rules! tls(
         (static $name:ident: $t:ty = $init:expr) => (
             #[thread_local]
-            static $name: ::tls::statik::Key<$t> = tls!($init);
+            static $name: ::tls::statik::Key<$t> = tls!($init, $t);
         );
         (static mut $name:ident: $t:ty = $init:expr) => (
             #[thread_local]
-            static mut $name: ::tls::statik::Key<$t> = tls!($init);
+            static mut $name: ::tls::statik::Key<$t> = tls!($init, $t);
         );
-        ($init:expr) => (
+        ($init:expr, $t:ty) => (
             ::tls::statik::Key {
                 inner: ::tls::statik::KeyInner {
                     inner: ::std::cell::UnsafeCell { value: $init },
@@ -159,6 +170,9 @@ mod imp {
         }
     }
 
+    // Since what appears to be glibc 2.18 this symbol has been shipped which
+    // GCC and clang both use to invoke destructors in thread_local globals, so
+    // let's do the same!
     #[cfg(target_os = "linux")]
     unsafe fn register_dtor<T>(t: *mut u8, dtor: unsafe extern fn(*mut u8)) {
         use libc;
@@ -171,6 +185,9 @@ mod imp {
         __cxa_thread_atexit_impl(dtor, t, __dso_handle);
     }
 
+    // OSX's analog of the above linux function is this _tlv_atexit function.
+    // The disassembly of thread_local globals in C++ (at least produced by
+    // clang) will have this show up in the output.
     #[cfg(target_os = "macos")]
     unsafe fn register_dtor<T>(t: *mut u8, dtor: unsafe extern fn(*mut u8)) {
         extern {

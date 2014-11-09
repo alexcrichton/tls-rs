@@ -5,15 +5,13 @@
 //  * for `statik`, think about failure in destructors
 //  * destructors for windows
 //  * application exit does not run pthread TLS dtors
-//  * re-initialize TLS slots after destruction
 //
 //  * detect __cxa_thread_atexit_impl at runtime, linuxes are all over the place
 //
 // WISHLIST
 //
 // * #[thread_local] => static can be non-Sync
-// * ManuallyDrop
-//  * too many fields are public for static initialization
+// * too many fields are public for static initialization
 
 
 #![feature(macro_rules, unsafe_destructor)]
