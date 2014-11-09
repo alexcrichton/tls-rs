@@ -99,7 +99,6 @@ mod imp {
     use std::intrinsics;
     use std::kinds::marker;
     use std::ptr;
-    use libc;
 
     use super::Ref;
 
@@ -159,6 +158,7 @@ mod imp {
 
     #[cfg(target_os = "linux")]
     unsafe fn register_dtor<T>(t: *mut u8, dtor: unsafe extern fn(*mut u8)) {
+        use libc;
         extern {
             static __dso_handle: *mut u8;
             fn __cxa_thread_atexit_impl(dtor: unsafe extern fn(*mut u8),
@@ -166,6 +166,15 @@ mod imp {
                                         -> libc::c_int;
         }
         __cxa_thread_atexit_impl(dtor, t, __dso_handle);
+    }
+
+    #[cfg(target_os = "macos")]
+    unsafe fn register_dtor<T>(t: *mut u8, dtor: unsafe extern fn(*mut u8)) {
+        extern {
+            fn _tlv_atexit(dtor: unsafe extern fn(*mut u8),
+                           arg: *mut u8);
+        }
+        _tlv_atexit(dtor, t);
     }
 
     #[doc(hidden)]
