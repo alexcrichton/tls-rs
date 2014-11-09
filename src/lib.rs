@@ -1,7 +1,6 @@
 //! Bindings to native thread-local-storage in a variety of flavors.
 
 // TODO
-//  * the `statik` module does not support dynamic initialization
 //  * for `statik`, think about failure in destructors
 //  * destructors for windows
 //  * application exit does not run pthread TLS dtors
