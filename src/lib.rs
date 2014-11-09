@@ -1,7 +1,6 @@
 //! Bindings to native thread-local-storage in a variety of flavors.
 
 // TODO
-//  * for `statik`, think about failure in destructors
 //  * application exit does not run pthread TLS dtors
 //
 // WISHLIST

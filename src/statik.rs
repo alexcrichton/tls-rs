@@ -12,6 +12,7 @@
 //! * A TLS key cannot be accessed while its destructor is running.
 //! * A TLS key may not be accessible after its destructor has run.
 //! * Repeately setting TLS keys during destruction may cause memory leaks.
+//! * A `panic!` in a TLS destructor will result in a process abort.
 //!
 //! It is generally recommended to avoid TLS from destructors themselves, and if
 //! required only doing so in a deterministic, non-cyclic fashion.
