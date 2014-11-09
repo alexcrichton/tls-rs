@@ -173,16 +173,60 @@ mod imp {
     // Since what appears to be glibc 2.18 this symbol has been shipped which
     // GCC and clang both use to invoke destructors in thread_local globals, so
     // let's do the same!
+    //
+    // Note, however, that we run on lots older linuxes, as well as cross
+    // compiling from a newer linux to an older linux, so we also have a
+    // fallback implementation to use as well.
     #[cfg(target_os = "linux")]
     unsafe fn register_dtor<T>(t: *mut u8, dtor: unsafe extern fn(*mut u8)) {
+        use std::mem;
+        use os;
         use libc;
         extern {
             static __dso_handle: *mut u8;
-            fn __cxa_thread_atexit_impl(dtor: unsafe extern fn(*mut u8),
-                                        arg: *mut u8, dso_handle: *mut u8)
-                                        -> libc::c_int;
+            #[linkage = "extern_weak"]
+            static __cxa_thread_atexit_impl: *const ();
         }
-        __cxa_thread_atexit_impl(dtor, t, __dso_handle);
+        if !__cxa_thread_atexit_impl.is_null() && false {
+            type F = unsafe extern fn(dtor: unsafe extern fn(*mut u8),
+                                      arg: *mut u8,
+                                      dso_handle: *mut u8) -> libc::c_int;
+            let f = mem::transmute::<_, F>(__cxa_thread_atexit_impl);
+            f(dtor, t, __dso_handle);
+            return
+        }
+
+        // The fallback implementation uses a vanilla OS-based TLS key to track
+        // the list of destructors that need to be run for this thread. The key
+        // then has its own destructor which runs all the other destructors.
+        //
+        // The destructor for DTORS is a little special in that it has a `while`
+        // loop to continuously drain the list of registered destructors. It
+        // *should* be the case that this loop always terminates because we
+        // provide the guarantee that a TLS key cannot be set after it is
+        // flagged for destruction.
+        static DTORS: os::StaticKey = os::StaticKey {
+            inner: os::INIT_INNER,
+            dtor: Some(run_dtors),
+        };
+        type List = Vec<(*mut u8, unsafe extern fn(*mut u8))>;
+        if DTORS.get().is_null() {
+            let v: Box<List> = box Vec::new();
+            DTORS.set(mem::transmute(v));
+        }
+        let list: &mut List = &mut *(DTORS.get() as *mut List);
+        list.push((t, dtor));
+
+        unsafe extern fn run_dtors(mut ptr: *mut u8) {
+            while !ptr.is_null() {
+                let list: Box<List> = mem::transmute(ptr);
+                for &(ptr, dtor) in list.iter() {
+                    dtor(ptr);
+                }
+                ptr = DTORS.get();
+                DTORS.set(0 as *mut _);
+            }
+        }
     }
 
     // OSX's analog of the above linux function is this _tlv_atexit function.
@@ -200,6 +244,9 @@ mod imp {
     #[doc(hidden)]
     pub unsafe extern fn destroy_value<T>(ptr: *mut u8) {
         let ptr = ptr as *mut Key<T>;
+        // Right before we run the user destructor be sure to flag the
+        // destructor as running for this thread so calls to `get` will return
+        // `None`.
         *(*ptr).dtor_running.get() = true;
         ptr::read((*ptr).inner.get() as *const T);
     }
@@ -280,6 +327,13 @@ mod imp {
 
     #[doc(hidden)]
     pub unsafe extern fn destroy_value<T>(ptr: *mut u8) {
+        // The OS TLS ensures that this key contains a NULL value when this
+        // destructor starts to run. We set it back to a sentinel value of 1 to
+        // ensure that any future calls to `get` for this thread will return
+        // `None`.
+        //
+        // Note that to prevent an infinite loop we reset it back to null right
+        // before we return from the destructor ourselves.
         let ptr: Box<Value<T>> = mem::transmute(ptr);
         let key = ptr.key;
         key.set(1 as *mut _);
@@ -378,5 +432,30 @@ mod tests {
         Thread::start(proc() unsafe {
             *K1.get().unwrap().get() = Some(S1);
         }).join();
+    }
+
+    #[test]
+    fn dtors_in_dtors_in_dtors() {
+        struct S1(Sender<()>);
+        tls!(static K1: UnsafeCell<Option<S1>> = UnsafeCell { value: None })
+        tls!(static K2: UnsafeCell<Option<Foo>> = UnsafeCell { value: None })
+
+        impl Drop for S1 {
+            fn drop(&mut self) {
+                let S1(ref tx) = *self;
+                unsafe {
+                    match K2.get() {
+                        Some(slot) => *slot.get() = Some(Foo(tx.clone())),
+                        None => {}
+                    }
+                }
+            }
+        }
+
+        let (tx, rx) = channel();
+        spawn(proc() unsafe {
+            *K1.get().unwrap().get() = Some(S1(tx));
+        });
+        rx.recv();
     }
 }

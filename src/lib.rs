@@ -6,15 +6,13 @@
 //  * destructors for windows
 //  * application exit does not run pthread TLS dtors
 //
-//  * detect __cxa_thread_atexit_impl at runtime, linuxes are all over the place
-//
 // WISHLIST
 //
 // * #[thread_local] => static can be non-Sync
 // * too many fields are public for static initialization
 
 
-#![feature(macro_rules, unsafe_destructor)]
+#![feature(macro_rules, unsafe_destructor, linkage)]
 #![deny(missing_docs)]
 
 extern crate libc;
