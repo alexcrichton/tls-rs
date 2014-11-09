@@ -2,7 +2,6 @@
 
 // TODO
 //  * for `statik`, think about failure in destructors
-//  * destructors for windows
 //  * application exit does not run pthread TLS dtors
 //
 // WISHLIST
