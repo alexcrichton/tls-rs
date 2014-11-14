@@ -102,3 +102,20 @@ fn thread_local(b: &mut Bencher) {
 
     b.iter(|| unsafe { doit() });
 }
+
+#[bench]
+fn local_variable(b: &mut Bencher) {
+    #[inline(never)]
+    fn doit(slot: &mut uint) -> uint {
+        for _ in range(0, N) {
+            *slot += 1;
+            test::black_box(&slot);
+        }
+        *slot
+    }
+
+    b.iter(|| {
+        let mut slot = 0;
+        doit(&mut slot)
+    });
+}
