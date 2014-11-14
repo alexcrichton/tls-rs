@@ -144,12 +144,14 @@ impl StaticKey {
     ///
     /// This will lazily allocate a TLS key from the OS if one has not already
     /// been allocated.
+    #[inline]
     pub unsafe fn get(&self) -> *mut u8 { imp::get(self.key()) }
 
     /// Sets this TLS key to a new value.
     ///
     /// This will lazily allocate a TLS key from the OS if one has not already
     /// been allocated.
+    #[inline]
     pub unsafe fn set(&self, val: *mut u8) { imp::set(self.key(), val) }
 
     /// Deallocates this OS TLS key.
@@ -166,8 +168,9 @@ impl StaticKey {
         }
     }
 
+    #[inline]
     unsafe fn key(&self) -> imp::Key {
-        match self.inner.key.load(atomic::SeqCst) {
+        match self.inner.key.load(atomic::Relaxed) {
             0 => self.lazy_init() as imp::Key,
             n => n as imp::Key
         }
@@ -200,16 +203,19 @@ impl Key {
     ///
     /// Note that the destructor will not be run when the `Key` goes out of
     /// scope.
+    #[inline]
     pub fn new(dtor: Option<unsafe extern fn(*mut u8)>) -> Key {
         Key { key: unsafe { imp::create(dtor) } }
     }
 
     /// See StaticKey::get
+    #[inline]
     pub fn get(&self) -> *mut u8 {
         unsafe { imp::get(self.key) }
     }
 
     /// See StaticKey::set
+    #[inline]
     pub fn set(&self, val: *mut u8) {
         unsafe { imp::set(self.key, val) }
     }
@@ -255,21 +261,25 @@ mod imp {
 
     pub type Key = pthread_key_t;
 
+    #[inline]
     pub unsafe fn create(dtor: Option<unsafe extern fn(*mut u8)>) -> Key {
         let mut key = 0;
         assert_eq!(pthread_key_create(&mut key, dtor), 0);
         return key;
     }
 
+    #[inline]
     pub unsafe fn set(key: Key, value: *mut u8) {
         let r = pthread_setspecific(key, value);
         debug_assert_eq!(r, 0);
     }
 
+    #[inline]
     pub unsafe fn get(key: Key) -> *mut u8 {
         pthread_getspecific(key)
     }
 
+    #[inline]
     pub unsafe fn destroy(key: Key) {
         let r = pthread_key_delete(key);
         debug_assert_eq!(r, 0);
@@ -345,6 +355,7 @@ mod imp {
     // This section is just raw bindings to the native functions that Windows
     // provides, There's a few extra calls to deal with destructors.
 
+    #[inline]
     pub unsafe fn create(dtor: Option<Dtor>) -> Key {
         const TLS_OUT_OF_INDEXES: DWORD = 0xFFFFFFFF;
         let key = TlsAlloc();
@@ -356,11 +367,13 @@ mod imp {
         return key;
     }
 
+    #[inline]
     pub unsafe fn set(key: Key, value: *mut u8) {
         let r = TlsSetValue(key, value as LPVOID);
         debug_assert!(r != 0);
     }
 
+    #[inline]
     pub unsafe fn get(key: Key) -> *mut u8 {
         TlsGetValue(key) as *mut u8
     }

@@ -74,16 +74,35 @@ fn dynamic(b: &mut Bencher) {
 }
 
 #[bench]
-fn os(b: &mut Bencher) {
+fn statik_os(b: &mut Bencher) {
     static FOO: tls::os::StaticKey = tls::os::INIT;
 
-    b.iter(|| unsafe {
+    #[inline(never)]
+    unsafe fn doit() -> uint {
         for _ in range(0, N) {
             let val = FOO.get() as uint;
             FOO.set((val + 1) as *mut _);
         }
-        FOO.get()
-    });
+        FOO.get() as uint
+    }
+
+    b.iter(|| unsafe { doit() });
+}
+
+#[bench]
+fn os(b: &mut Bencher) {
+    let key = tls::os::Key::new(None);
+
+    #[inline(never)]
+    fn doit(key: &tls::os::Key) -> uint {
+        for _ in range(0, N) {
+            let val = key.get() as uint;
+            key.set((val + 1) as *mut _);
+        }
+        key.get() as uint
+    }
+
+    b.iter(|| doit(&key));
 }
 
 #[bench]
