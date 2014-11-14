@@ -43,28 +43,34 @@ fn scoped(b: &mut Bencher) {
 fn statik(b: &mut Bencher) {
     tls!(static FOO: UnsafeCell<uint> = UnsafeCell { value: 0 })
 
-    b.iter(|| unsafe {
+    #[inline(never)]
+    unsafe fn doit() -> uint {
         for _ in range(0, N) {
             let slot = FOO.get().unwrap();
             *slot.get() = *slot.get() + 1;
-            test::black_box(&slot);
+            test::black_box(&FOO);
         }
-        FOO.get()
-    });
+        *FOO.get().unwrap().get()
+    }
+
+    b.iter(|| unsafe { doit() });
 }
 
 #[bench]
 fn dynamic(b: &mut Bencher) {
     dynamic_tls!(static FOO: Cell<uint> = Cell::new(0))
 
-    b.iter(|| {
+    #[inline(never)]
+    fn doit() -> uint {
         for _ in range(0, N) {
             let slot = FOO.get().unwrap();
             slot.set(slot.get() + 1);
             test::black_box(&slot);
         }
-        FOO.get()
-    });
+        FOO.get().unwrap().get()
+    }
+
+    b.iter(doit);
 }
 
 #[bench]
@@ -85,11 +91,14 @@ fn thread_local(b: &mut Bencher) {
     #[thread_local]
     static FOO: UnsafeCell<uint> = UnsafeCell { value: 0 };
 
-    b.iter(|| unsafe {
+    #[inline(never)]
+    unsafe fn doit() -> uint {
         for _ in range(0, N) {
             *FOO.get() = *FOO.get() + 1;
             test::black_box(&FOO);
         }
         *FOO.get()
-    });
+    }
+
+    b.iter(|| unsafe { doit() });
 }
