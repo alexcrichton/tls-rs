@@ -119,3 +119,19 @@ fn local_variable(b: &mut Bencher) {
         doit(&mut slot)
     });
 }
+
+#[bench]
+fn noop(b: &mut Bencher) {
+    #[inline(never)]
+    fn doit(slot: &mut uint) -> uint {
+        for _ in range(0, N) {
+            test::black_box(&slot);
+        }
+        *slot
+    }
+
+    b.iter(|| {
+        let mut slot = 0;
+        doit(&mut slot)
+    });
+}
