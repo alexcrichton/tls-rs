@@ -121,6 +121,21 @@ fn local_variable(b: &mut Bencher) {
 }
 
 #[bench]
+fn global_variable(b: &mut Bencher) {
+    static mut FOO: uint = 0;
+    #[inline(never)]
+    unsafe fn doit() -> uint {
+        for _ in range(0, N) {
+            FOO += 1;
+            test::black_box(&FOO);
+        }
+        FOO
+    }
+
+    b.iter(|| unsafe { doit() });
+}
+
+#[bench]
 fn noop(b: &mut Bencher) {
     #[inline(never)]
     fn doit(slot: &mut uint) -> uint {
