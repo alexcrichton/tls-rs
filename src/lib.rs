@@ -46,6 +46,7 @@
 //! #[phase(plugin, link)]
 //! extern crate tls;
 //!
+//! use std::num::Int;
 //! use tls::os;
 //!
 //! static OS_KEY: os::StaticKey = os::INIT;

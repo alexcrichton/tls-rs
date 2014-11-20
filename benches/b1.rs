@@ -25,17 +25,21 @@ fn local_data(b: &mut Bencher) {
 #[bench]
 fn scoped(b: &mut Bencher) {
     scoped_tls!(static FOO: Cell<uint>)
+
+    #[inline(never)]
+    fn doit() -> uint {
+        for _ in range(0, N) {
+            FOO.with(|slot| {
+                let slot = slot.unwrap();
+                slot.set(slot.get() + 1);
+            });
+        }
+        FOO.with(|slot| slot.unwrap().get())
+    }
+
     b.iter(|| {
         let slot = Cell::new(0);
-        FOO.set(&slot, || {
-            for _ in range(0, N) {
-                FOO.with(|slot| {
-                    let slot = slot.unwrap();
-                    slot.set(slot.get() + 1);
-                });
-            }
-        });
-        slot
+        FOO.set(&slot, doit)
     });
 }
 
