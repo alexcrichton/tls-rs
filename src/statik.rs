@@ -397,7 +397,7 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use std::cell::UnsafeCell;
-    use std::rt::thread::Thread;
+    use rustrt::thread::Thread;
 
     struct Foo(Sender<()>);
 

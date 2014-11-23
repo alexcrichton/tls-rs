@@ -52,7 +52,7 @@
 
 use std::kinds::marker;
 use std::mem;
-use std::rt::exclusive::Exclusive;
+use rustrt::exclusive::Exclusive;
 use std::rt;
 use std::sync::atomic::{mod, AtomicUint};
 use std::sync::{Once, ONCE_INIT};

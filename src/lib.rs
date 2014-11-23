@@ -75,6 +75,7 @@
 #![deny(missing_docs)]
 
 extern crate libc;
+extern crate rustrt;
 
 pub mod statik;
 pub mod os;
