@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="rustdoc">
+    <meta name="description" content="API documentation for the Rust `StaticKey` struct in crate `tls`.">
+    <meta name="keywords" content="rust, rustlang, rust-lang, StaticKey">
+
+    <title>tls::os::StaticKey - Rust</title>
+
+    <link rel="stylesheet" type="text/css" href="../../main.css">
+
+    
+    
+</head>
+<body class="rustdoc">
+    <!--[if lte IE 8]>
+    <div class="warning">
+        This old browser is unsupported and will most likely display funky
+        things.
+    </div>
+    <![endif]-->
+
+    
+
+    <section class="sidebar">
+        
+        <p class='location'><a href='../index.html'>tls</a>::<wbr><a href='index.html'>os</a></p><div class='block struct'><h2>Structs</h2><a class='struct ' href='struct.Key.html'>Key</a><a class='struct current' href='struct.StaticKey.html'>StaticKey</a><a class='struct ' href='struct.StaticKeyInner.html'>StaticKeyInner</a></div>
+    </section>
+
+    <nav class="sub">
+        <form class="search-form js-only">
+            <div class="search-container">
+                <input class="search-input" name="search"
+                       autocomplete="off"
+                       placeholder="Click or press 'S' to search, '?' for more options..."
+                       type="search">
+            </div>
+        </form>
+    </nav>
+
+    <section id='main' class="content struct">
+<h1 class='fqn'><span class='in-band'>Struct <a href='../index.html'>tls</a>::<wbr><a href='index.html'>os</a>::<wbr><a class='struct' href=''>StaticKey</a><wbr></span><span class='out-of-band'><span id='render-detail'>
+            <a id="collapse-all" href="#">[-]
+            </a>&nbsp;<a id="expand-all" href="#">[+]</a>
+        </span><a id='src-339' href='../../src/tls/os.rs.html#81-90'>[src]</a></span></h1>
+<pre class='rust struct'>pub struct StaticKey {
+    pub inner: <a class='struct' href='../../tls/os/struct.StaticKeyInner.html' title='tls::os::StaticKeyInner'>StaticKeyInner</a>,
+    pub dtor: <a class='enum' href='http://doc.rust-lang.org/nightly/core/option/enum.Option.html' title='core::option::Option'>Option</a>&lt;unsafe  extern "C" fn(*mut <a href='http://doc.rust-lang.org/nightly/std/primitive.u8.html'>u8</a>)&gt;,
+}</pre><div class='docblock'><p>A type for TLS keys that are statically allocated.</p>
+
+<p>This type is entirely <code>unsafe</code> to use as it does not protect against
+use-after-deallocation or use-during-deallocation.</p>
+
+<p>The actual OS-TLS key is lazily allocated when this is used for the first
+time. The key is also deallocated when the Rust runtime exits or <code>destroy</code>
+is called, whichever comes first.</p>
+
+<h1 id="example" class='section-header'><a
+                           href="#example">Example</a></h1><pre class='rust '>
+<span class='kw'>use</span> <span class='ident'>tls</span>::<span class='ident'>os</span>::{<span class='ident'>StaticKey</span>, <span class='ident'>INIT</span>};
+
+<span class='kw'>static</span> <span class='ident'>KEY</span>: <span class='ident'>StaticKey</span> <span class='op'>=</span> <span class='ident'>INIT</span>;
+
+<span class='kw'>unsafe</span> {
+    <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>KEY</span>.<span class='ident'>get</span>().<span class='ident'>is_null</span>());
+    <span class='ident'>KEY</span>.<span class='ident'>set</span>(<span class='number'>1</span> <span class='kw'>as</span> <span class='op'>*</span><span class='kw-2'>mut</span> <span class='ident'>u8</span>);
+}
+</pre>
+</div><h2 class='fields'>Fields</h2>
+<table><tr><td id='structfield.inner'><a class='stability Unmarked' title='No stability level'></a><code>inner</code></td><td><div class='docblock'><p>Inner static TLS key (internals), created with by <code>INIT_INNER</code> in this
+module.</p>
+</div></td></tr><tr><td id='structfield.dtor'><a class='stability Unmarked' title='No stability level'></a><code>dtor</code></td><td><div class='docblock'><p>Destructor for the TLS value.</p>
+
+<p>See <code>Key::new</code> for information about when the destructor runs and how
+it runs.</p>
+</div></td></tr></table><h2 id='methods'>Methods</h2><h3 class='impl'><a class='stability Unmarked' title='No stability level'></a><code>impl <a class='struct' href='../../tls/os/struct.StaticKey.html' title='tls::os::StaticKey'>StaticKey</a></code></h3><div class='impl-items'><h4 id='method.get' class='method'><a class='stability Unmarked' title='No stability level'></a><code>unsafe fn <a href='#method.get' class='fnname'>get</a>(&amp;self) -&gt; *mut <a href='http://doc.rust-lang.org/nightly/std/primitive.u8.html'>u8</a></code></h4>
+<div class='docblock'><p>Gets the value associated with this TLS key</p>
+
+<p>This will lazily allocate a TLS key from the OS if one has not already
+been allocated.</p>
+</div><h4 id='method.set' class='method'><a class='stability Unmarked' title='No stability level'></a><code>unsafe fn <a href='#method.set' class='fnname'>set</a>(&amp;self, val: *mut <a href='http://doc.rust-lang.org/nightly/std/primitive.u8.html'>u8</a>)</code></h4>
+<div class='docblock'><p>Sets this TLS key to a new value.</p>
+
+<p>This will lazily allocate a TLS key from the OS if one has not already
+been allocated.</p>
+</div><h4 id='method.destroy' class='method'><a class='stability Unmarked' title='No stability level'></a><code>unsafe fn <a href='#method.destroy' class='fnname'>destroy</a>(&amp;self)</code></h4>
+<div class='docblock'><p>Deallocates this OS TLS key.</p>
+
+<p>This function is unsafe as there is no guarantee that the key is not
+currently in use by other threads or will not ever be used again.</p>
+
+<p>Note that this does <em>not</em> run the user-provided destructor if one was
+specified at definition time. Doing so must be done manually.</p>
+</div></div></section>
+    <section id='search' class="content hidden"></section>
+
+    <section class="footer"></section>
+
+    <div id="help" class="hidden">
+        <div class="shortcuts">
+            <h1>Keyboard shortcuts</h1>
+            <dl>
+                <dt>?</dt>
+                <dd>Show this help dialog</dd>
+                <dt>S</dt>
+                <dd>Focus the search field</dd>
+                <dt>&larrb;</dt>
+                <dd>Move up in search results</dd>
+                <dt>&rarrb;</dt>
+                <dd>Move down in search results</dd>
+                <dt>&#9166;</dt>
+                <dd>Go to active search result</dd>
+            </dl>
+        </div>
+        <div class="infos">
+            <h1>Search tricks</h1>
+            <p>
+                Prefix searches with a type followed by a colon (e.g.
+                <code>fn:</code>) to restrict the search to a given type.
+            </p>
+            <p>
+                Accepted types are: <code>fn</code>, <code>mod</code>,
+                <code>struct</code>, <code>enum</code>,
+                <code>trait</code>, <code>typedef</code> (or
+                <code>tdef</code>).
+            </p>
+        </div>
+    </div>
+
+    
+
+    <script>
+        window.rootPath = "../../";
+        window.currentCrate = "tls";
+        window.playgroundUrl = "";
+    </script>
+    <script src="../../jquery.js"></script>
+    <script src="../../main.js"></script>
+    
+    <script async src="../../search-index.js"></script>
+</body>
+</html>

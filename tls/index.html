@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="rustdoc">
+    <meta name="description" content="API documentation for the Rust `tls` crate.">
+    <meta name="keywords" content="rust, rustlang, rust-lang, tls">
+
+    <title>tls - Rust</title>
+
+    <link rel="stylesheet" type="text/css" href="../main.css">
+
+    
+    
+</head>
+<body class="rustdoc">
+    <!--[if lte IE 8]>
+    <div class="warning">
+        This old browser is unsupported and will most likely display funky
+        things.
+    </div>
+    <![endif]-->
+
+    
+
+    <section class="sidebar">
+        
+        <p class='location'></p>
+    </section>
+
+    <nav class="sub">
+        <form class="search-form js-only">
+            <div class="search-container">
+                <input class="search-input" name="search"
+                       autocomplete="off"
+                       placeholder="Click or press 'S' to search, '?' for more options..."
+                       type="search">
+            </div>
+        </form>
+    </nav>
+
+    <section id='main' class="content mod">
+<h1 class='fqn'><span class='in-band'>Crate <a class='mod' href=''>tls</a><wbr></span><span class='out-of-band'><a href='stability.html'>[stability]</a> <span id='render-detail'>
+            <a id="collapse-all" href="#">[-]
+            </a>&nbsp;<a id="expand-all" href="#">[+]</a>
+        </span><a id='src-0' href='../src/tls/lib.rs.html#1-88'>[src]</a></span></h1>
+<div class='docblock'><p>Bindings to native thread-local-storage in a variety of flavors.</p>
+
+<p>This library contains an implementation of TLS keys and values for Rust.
+There are a few prominent options to choose from when thinking about using a
+TLS variable:</p>
+
+<ul>
+<li><p>OS-based TLS. The most <code>unsafe</code> of the bunch, this is provided by the <code>os</code>
+module in this crate and simply contains raw bindings to the system APIs
+for TLS storage. Usage of this type will likely require a number of
+<code>unsafe</code> blocks.</p></li>
+<li><p>Scoped TLS. Perhaps the &quot;safest&quot; of the bunch, this form of TLS provides a
+scoping mechanism where values are placed into TLS for a known period of
+time. Provided by the <code>scoped</code> module of this crate, borrowed pointers are
+stored into TLS for the duration of a closure body, and the borrowed
+pointers can be freely borrowed at any time (with shared borrows).</p></li>
+<li><p>Static TLS. This form of TLS is for data which can be statically
+initialized. The data is automatically available for all threads, and
+destructors will also be run as necessary for any threads which access the
+TLS data. This form is somewhat &quot;unsafe&quot; in terms of destructors, so
+please be sure to consult the documentation. This functionality is
+provided by the <code>statik</code> module in this crate.</p></li>
+<li><p>Dynamic TLS. This is the closest to C++11&#39;s <code>thread_local</code> keyword
+provided by this crate. This is implemented on top of static TLS, but also
+allows for dynamic initialization as well as destruction of values. This
+form comes in the <code>dynamic</code> module and is also associated with the same
+caveats as static TLS.</p></li>
+</ul>
+
+<p>Each module provides a type with the name <code>Key</code> which corresponds to that
+kind of TLS key. With the exception of <code>os</code>, each module also attempts to
+compile to the fastest version available. This is sometimes the <code>os</code> module
+itself, but some platforms can leverage LLVM&#39;s specialized support for
+thread local globals as well.</p>
+
+<h1 id="usage" class='section-header'><a
+                           href="#usage">Usage</a></h1>
+<p>TLS keys should be thought of as new <code>static</code> variables which serve as a
+handle to acquire a value from. Each module in this crate provides a macro
+or <code>const</code> to create this <code>static</code> for consumer crates. Detailed examples
+can be found on each module, but a general overview looks like:</p>
+<pre class='rust '>
+<span class='attribute'>#<span class='op'>!</span>[<span class='ident'>feature</span>(<span class='ident'>phase</span>)]</span>
+<span class='attribute'>#[<span class='ident'>phase</span>(<span class='ident'>plugin</span>, <span class='ident'>link</span>)]</span>
+<span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>tls</span>;
+
+<span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>num</span>::<span class='ident'>Int</span>;
+<span class='kw'>use</span> <span class='ident'>tls</span>::<span class='ident'>os</span>;
+
+<span class='kw'>static</span> <span class='ident'>OS_KEY</span>: <span class='ident'>os</span>::<span class='ident'>StaticKey</span> <span class='op'>=</span> <span class='ident'>os</span>::<span class='ident'>INIT</span>;
+<span class='kw'>static</span> <span class='ident'>OS_KEY_WITH_DTOR</span>: <span class='ident'>os</span>::<span class='ident'>StaticKey</span> <span class='op'>=</span> <span class='ident'>os</span>::<span class='ident'>StaticKey</span> {
+    <span class='ident'>inner</span>: <span class='ident'>os</span>::<span class='ident'>INIT_INNER</span>,
+    <span class='ident'>dtor</span>: <span class='prelude-val'>Some</span>(<span class='ident'>dtor</span>),
+};
+
+<span class='comment'>// Creates a `static` of type tls::scoped::Key</span>
+<span class='macro'>scoped_tls</span><span class='macro'>!</span>(<span class='kw'>static</span> <span class='ident'>SCOPED_KEY</span>: <span class='ident'>uint</span>)
+
+<span class='comment'>// Creates a `static` of type tls::statik::Key</span>
+<span class='macro'>tls</span><span class='macro'>!</span>(<span class='kw'>static</span> <span class='ident'>STATIC_KEY</span>: <span class='ident'>uint</span> <span class='op'>=</span> <span class='number'>5</span>)
+
+<span class='comment'>// Creates a `static` of type tls::dynamic::Key</span>
+<span class='macro'>dynamic_tls</span><span class='macro'>!</span>(<span class='kw'>static</span> <span class='ident'>DYNAMIC_KEY</span>: <span class='ident'>uint</span> <span class='op'>=</span> <span class='number'>5i</span>.<span class='ident'>count_ones</span>())
+
+<span class='kw'>fn</span> <span class='ident'>main</span>() {
+    <span class='comment'>// see api docs for each respective type</span>
+}
+
+<span class='kw'>unsafe</span> <span class='kw'>extern</span> <span class='kw'>fn</span> <span class='ident'>dtor</span>(<span class='ident'>ptr</span>: <span class='op'>*</span><span class='kw-2'>mut</span> <span class='ident'>u8</span>) { <span class='comment'>/* ... */</span> }
+</pre>
+</div><h2 id='modules' class='section-header'><a href="#modules">Modules</a></h2>
+<table>
+                    <tr>
+                        <td><a class='stability Unmarked' title='No stability level'></a><a class='mod' href='dynamic/index.html'
+                               title='tls::dynamic'>dynamic</a></td>
+                        <td class='docblock short'><p>Dynamically initialized, owning TLS</p>
+</td>
+                    </tr>
+                
+                    <tr>
+                        <td><a class='stability Unmarked' title='No stability level'></a><a class='mod' href='os/index.html'
+                               title='tls::os'>os</a></td>
+                        <td class='docblock short'><p>OS-based thread local storage</p>
+</td>
+                    </tr>
+                
+                    <tr>
+                        <td><a class='stability Unmarked' title='No stability level'></a><a class='mod' href='scoped/index.html'
+                               title='tls::scoped'>scoped</a></td>
+                        <td class='docblock short'><p>Scoped thread-local storage</p>
+</td>
+                    </tr>
+                
+                    <tr>
+                        <td><a class='stability Unmarked' title='No stability level'></a><a class='mod' href='statik/index.html'
+                               title='tls::statik'>statik</a></td>
+                        <td class='docblock short'><p>Statically initialized, owning TLS</p>
+</td>
+                    </tr>
+                </table><h2 id='macros' class='section-header'><a href="#macros">Macros</a></h2>
+<table>
+                    <tr>
+                        <td><a class='stability Unmarked' title='No stability level'></a><a class='macro' href='macro.dynamic_tls!.html'
+                               title='tls::dynamic_tls!'>dynamic_tls!</a></td>
+                        <td class='docblock short'></td>
+                    </tr>
+                
+                    <tr>
+                        <td><a class='stability Unmarked' title='No stability level'></a><a class='macro' href='macro.scoped_tls!.html'
+                               title='tls::scoped_tls!'>scoped_tls!</a></td>
+                        <td class='docblock short'><p>Declare a new scoped TLS key.</p>
+</td>
+                    </tr>
+                
+                    <tr>
+                        <td><a class='stability Unmarked' title='No stability level'></a><a class='macro' href='macro.scoped_tls!.html'
+                               title='tls::scoped_tls!'>scoped_tls!</a></td>
+                        <td class='docblock short'></td>
+                    </tr>
+                
+                    <tr>
+                        <td><a class='stability Unmarked' title='No stability level'></a><a class='macro' href='macro.tls!.html'
+                               title='tls::tls!'>tls!</a></td>
+                        <td class='docblock short'></td>
+                    </tr>
+                </table></section>
+    <section id='search' class="content hidden"></section>
+
+    <section class="footer"></section>
+
+    <div id="help" class="hidden">
+        <div class="shortcuts">
+            <h1>Keyboard shortcuts</h1>
+            <dl>
+                <dt>?</dt>
+                <dd>Show this help dialog</dd>
+                <dt>S</dt>
+                <dd>Focus the search field</dd>
+                <dt>&larrb;</dt>
+                <dd>Move up in search results</dd>
+                <dt>&rarrb;</dt>
+                <dd>Move down in search results</dd>
+                <dt>&#9166;</dt>
+                <dd>Go to active search result</dd>
+            </dl>
+        </div>
+        <div class="infos">
+            <h1>Search tricks</h1>
+            <p>
+                Prefix searches with a type followed by a colon (e.g.
+                <code>fn:</code>) to restrict the search to a given type.
+            </p>
+            <p>
+                Accepted types are: <code>fn</code>, <code>mod</code>,
+                <code>struct</code>, <code>enum</code>,
+                <code>trait</code>, <code>typedef</code> (or
+                <code>tdef</code>).
+            </p>
+        </div>
+    </div>
+
+    
+
+    <script>
+        window.rootPath = "../";
+        window.currentCrate = "tls";
+        window.playgroundUrl = "";
+    </script>
+    <script src="../jquery.js"></script>
+    <script src="../main.js"></script>
+    
+    <script async src="../search-index.js"></script>
+</body>
+</html>

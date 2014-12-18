@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="rustdoc">
+    <meta name="description" content="API documentation for the Rust `statik` mod in crate `tls`.">
+    <meta name="keywords" content="rust, rustlang, rust-lang, statik">
+
+    <title>tls::statik - Rust</title>
+
+    <link rel="stylesheet" type="text/css" href="../../main.css">
+
+    
+    
+</head>
+<body class="rustdoc">
+    <!--[if lte IE 8]>
+    <div class="warning">
+        This old browser is unsupported and will most likely display funky
+        things.
+    </div>
+    <![endif]-->
+
+    
+
+    <section class="sidebar">
+        
+        <p class='location'><a href='../index.html'>tls</a></p><div class='block mod'><h2>Modules</h2><a class='mod ' href='../dynamic/index.html'>dynamic</a><a class='mod ' href='../os/index.html'>os</a><a class='mod ' href='../scoped/index.html'>scoped</a><a class='mod current' href='../statik/index.html'>statik</a></div><div class='block macro'><h2>Macros</h2><a class='macro ' href='../macro.dynamic_tls!.html'>dynamic_tls!</a><a class='macro ' href='../macro.scoped_tls!.html'>scoped_tls!</a><a class='macro ' href='../macro.scoped_tls!.html'>scoped_tls!</a><a class='macro ' href='../macro.tls!.html'>tls!</a></div>
+    </section>
+
+    <nav class="sub">
+        <form class="search-form js-only">
+            <div class="search-container">
+                <input class="search-input" name="search"
+                       autocomplete="off"
+                       placeholder="Click or press 'S' to search, '?' for more options..."
+                       type="search">
+            </div>
+        </form>
+    </nav>
+
+    <section id='main' class="content mod">
+<h1 class='fqn'><span class='in-band'>Module <a href='../index.html'>tls</a>::<wbr><a class='mod' href=''>statik</a><wbr></span><span class='out-of-band'><span id='render-detail'>
+            <a id="collapse-all" href="#">[-]
+            </a>&nbsp;<a id="expand-all" href="#">[+]</a>
+        </span><a id='src-6' href='../../src/tls/statik.rs.html#1-525'>[src]</a></span></h1>
+<div class='docblock'><p>Statically initialized, owning TLS</p>
+
+<p>This module implements a &quot;flavor&quot; of TLS where the TLS slot owns the data
+that it contains. All contents, however, must be statically initialized. Any
+value which does not contain references is permitted inside a key of this
+type. This means that owning TLS keys also allow for content with
+destructors.</p>
+
+<p>The destructor for TLS values will run when the thread exits. There are some
+nuances about destructors, however:</p>
+
+<ul>
+<li>A TLS key cannot be accessed while its destructor is running.</li>
+<li>A TLS key may not be accessible after its destructor has run.</li>
+<li>Repeately setting TLS keys during destruction may cause memory leaks.</li>
+<li>A <code>panic!</code> in a TLS destructor will result in a process abort.</li>
+<li>TLS destructors may not be run when the application exits (the entire
+process is exiting anyway).</li>
+</ul>
+
+<p>It is generally recommended to avoid TLS from destructors themselves, and if
+required only doing so in a deterministic, non-cyclic fashion.</p>
+
+<p>This form of TLS will also attempt to select the &quot;fastest&quot; implementation of
+TLS available for the target platform.</p>
+
+<h1 id="example" class='section-header'><a
+                           href="#example">Example</a></h1><pre class='rust '>
+<span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>cell</span>::<span class='ident'>UnsafeCell</span>;
+
+<span class='macro'>tls</span><span class='macro'>!</span>(<span class='kw'>static</span> <span class='ident'>FOO</span>: <span class='ident'>UnsafeCell</span><span class='op'>&lt;</span><span class='ident'>uint</span><span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>UnsafeCell</span> { <span class='ident'>value</span>: <span class='number'>1</span> });
+
+<span class='kw'>unsafe</span> {
+    <span class='kw'>let</span> <span class='ident'>f</span> <span class='op'>=</span> <span class='ident'>FOO</span>.<span class='ident'>get</span>().<span class='ident'>unwrap</span>();
+    <span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='op'>*</span><span class='ident'>f</span>.<span class='ident'>get</span>(), <span class='number'>1</span>);
+    <span class='op'>*</span><span class='ident'>f</span>.<span class='ident'>get</span>() <span class='op'>=</span> <span class='number'>2</span>;
+
+    <span class='comment'>// each thread starts out with the initial value of 1</span>
+    <span class='ident'>spawn</span>(<span class='kw'>move</span> <span class='op'>||</span> {
+        <span class='kw'>let</span> <span class='ident'>f</span> <span class='op'>=</span> <span class='ident'>FOO</span>.<span class='ident'>get</span>().<span class='ident'>unwrap</span>();
+        <span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='op'>*</span><span class='ident'>f</span>.<span class='ident'>get</span>(), <span class='number'>1</span>);
+        <span class='op'>*</span><span class='ident'>f</span>.<span class='ident'>get</span>() <span class='op'>=</span> <span class='number'>3</span>;
+    });
+
+    <span class='comment'>// we retain our original value of 2 despite the child thread</span>
+    <span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='op'>*</span><span class='ident'>FOO</span>.<span class='ident'>get</span>().<span class='ident'>unwrap</span>().<span class='ident'>get</span>(), <span class='number'>2</span>);
+}
+</pre>
+</div><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<table>
+                    <tr>
+                        <td><a class='stability Unmarked' title='No stability level'></a><a class='struct' href='struct.Key.html'
+                               title='tls::statik::Key'>Key</a></td>
+                        <td class='docblock short'><p>A TLS key which owns its contents.</p>
+</td>
+                    </tr>
+                
+                    <tr>
+                        <td><a class='stability Unmarked' title='No stability level'></a><a class='struct' href='struct.Ref.html'
+                               title='tls::statik::Ref'>Ref</a></td>
+                        <td class='docblock short'><p>A structure representing a reference to a TLS value.</p>
+</td>
+                    </tr>
+                </table></section>
+    <section id='search' class="content hidden"></section>
+
+    <section class="footer"></section>
+
+    <div id="help" class="hidden">
+        <div class="shortcuts">
+            <h1>Keyboard shortcuts</h1>
+            <dl>
+                <dt>?</dt>
+                <dd>Show this help dialog</dd>
+                <dt>S</dt>
+                <dd>Focus the search field</dd>
+                <dt>&larrb;</dt>
+                <dd>Move up in search results</dd>
+                <dt>&rarrb;</dt>
+                <dd>Move down in search results</dd>
+                <dt>&#9166;</dt>
+                <dd>Go to active search result</dd>
+            </dl>
+        </div>
+        <div class="infos">
+            <h1>Search tricks</h1>
+            <p>
+                Prefix searches with a type followed by a colon (e.g.
+                <code>fn:</code>) to restrict the search to a given type.
+            </p>
+            <p>
+                Accepted types are: <code>fn</code>, <code>mod</code>,
+                <code>struct</code>, <code>enum</code>,
+                <code>trait</code>, <code>typedef</code> (or
+                <code>tdef</code>).
+            </p>
+        </div>
+    </div>
+
+    
+
+    <script>
+        window.rootPath = "../../";
+        window.currentCrate = "tls";
+        window.playgroundUrl = "";
+    </script>
+    <script src="../../jquery.js"></script>
+    <script src="../../main.js"></script>
+    
+    <script async src="../../search-index.js"></script>
+</body>
+</html>
