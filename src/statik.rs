@@ -38,7 +38,7 @@
 //!     *f.get() = 2;
 //!
 //!     // each thread starts out with the initial value of 1
-//!     spawn(proc() {
+//!     spawn(move || {
 //!         let f = FOO.get().unwrap();
 //!         assert_eq!(*f.get(), 1);
 //!         *f.get() = 3;
@@ -93,7 +93,7 @@ pub use self::imp::destroy_value;
 ///     *f.get() = 2;
 ///
 ///     // each thread starts out with the initial value of 1
-///     spawn(proc() {
+///     spawn(move || {
 ///         let f = FOO.get().unwrap();
 ///         assert_eq!(*f.get(), 1);
 ///         *f.get() = 3;
@@ -417,7 +417,7 @@ mod tests {
             assert_eq!(*f.get(), 1);
             *f.get() = 2;
             let (tx, rx) = channel();
-            spawn(proc() {
+            spawn(move || {
                 assert_eq!(*FOO.get().unwrap().get(), 1);
                 tx.send(());
             });
@@ -431,7 +431,7 @@ mod tests {
         tls!(static FOO: UnsafeCell<Option<Foo>> = UnsafeCell { value: None })
 
         let (tx, rx) = channel();
-        spawn(proc() unsafe {
+        spawn(move || unsafe {
             *FOO.get().unwrap().get() = Some(Foo(tx));
         });
         rx.recv();
@@ -477,7 +477,7 @@ mod tests {
             }
         }
 
-        Thread::start(proc() {
+        Thread::start(move || {
             drop(S1);
         }).join();
     }
@@ -493,7 +493,7 @@ mod tests {
             }
         }
 
-        Thread::start(proc() unsafe {
+        Thread::start(move || unsafe {
             *K1.get().unwrap().get() = Some(S1);
         }).join();
     }
@@ -517,7 +517,7 @@ mod tests {
         }
 
         let (tx, rx) = channel();
-        spawn(proc() unsafe {
+        spawn(move || unsafe {
             *K1.get().unwrap().get() = Some(S1(tx));
         });
         rx.recv();

@@ -233,7 +233,7 @@ fn init_keys() {
         KEYS = mem::transmute(keys);
     }
 
-    rt::at_exit(proc() unsafe {
+    rt::at_exit(move || unsafe {
         let keys: Box<Exclusive<Vec<imp::Key>>> = mem::transmute(KEYS);
         KEYS = 0 as *mut _;
         let keys = keys.lock();
@@ -422,7 +422,7 @@ mod imp {
             DTORS = mem::transmute(dtors);
         }
 
-        rt::at_exit(proc() unsafe {
+        rt::at_exit(move || unsafe {
             mem::transmute::<_, Box<Exclusive<Vec<(Key, Dtor)>>>>(DTORS);
             DTORS = 0 as *mut _;
         });
