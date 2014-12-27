@@ -94,7 +94,7 @@ macro_rules! dynamic_tls(
             init: __init,
         }
     });
-)
+);
 
 impl<T: 'static> Key<T> {
     /// Access this TLS variable, lazily initializing it if necessary.

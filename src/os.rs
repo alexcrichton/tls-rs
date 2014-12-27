@@ -52,10 +52,9 @@
 
 use std::kinds::marker;
 use std::mem;
-use rustrt::exclusive::Exclusive;
 use std::rt;
 use std::sync::atomic::{mod, AtomicUint};
-use std::sync::{Once, ONCE_INIT};
+use std::sync::{Mutex, Once, ONCE_INIT};
 
 /// A type for TLS keys that are statically allocated.
 ///
@@ -137,7 +136,7 @@ pub const INIT_INNER: StaticKeyInner = StaticKeyInner {
 };
 
 static INIT_KEYS: Once = ONCE_INIT;
-static mut KEYS: *mut Exclusive<Vec<imp::Key>> = 0 as *mut _;
+static mut KEYS: *mut Mutex<Vec<imp::Key>> = 0 as *mut _;
 
 impl StaticKey {
     /// Gets the value associated with this TLS key
@@ -228,13 +227,13 @@ impl Drop for Key {
 }
 
 fn init_keys() {
-    let keys = box Exclusive::new(Vec::<imp::Key>::new());
+    let keys = box Mutex::new(Vec::<imp::Key>::new());
     unsafe {
         KEYS = mem::transmute(keys);
     }
 
     rt::at_exit(move || unsafe {
-        let keys: Box<Exclusive<Vec<imp::Key>>> = mem::transmute(KEYS);
+        let keys: Box<Mutex<Vec<imp::Key>>> = mem::transmute(KEYS);
         KEYS = 0 as *mut _;
         let keys = keys.lock();
         for key in keys.iter() {
