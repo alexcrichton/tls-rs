@@ -192,7 +192,7 @@ mod imp {
                 },
             }
         );
-    )
+    );
 
     #[doc(hidden)]
     impl<T> Key<T> {
@@ -336,13 +336,13 @@ mod imp {
                     inner: $init,
                     os: ::tls::os::StaticKey {
                         inner: ::tls::os::INIT_INNER,
-                        dtor: Some(__destroy),
+                        dtor: Some(__destroy as unsafe extern fn(*mut u8)),
                     },
                     valid: ::tls::os::INIT,
                 },
             }
         });
-    )
+    );
 
     #[doc(hidden)]
     impl<T> Key<T> {
@@ -397,7 +397,7 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use std::cell::UnsafeCell;
-    use rustrt::thread::Thread;
+    use std::thread::Thread;
 
     struct Foo(Sender<()>);
 
@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn smoke_no_dtor() {
-        tls!(static FOO: UnsafeCell<int> = UnsafeCell { value: 1 })
+        tls!(static FOO: UnsafeCell<int> = UnsafeCell { value: 1 });
 
         unsafe {
             let f = FOO.get().unwrap();
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn smoke_dtor() {
-        tls!(static FOO: UnsafeCell<Option<Foo>> = UnsafeCell { value: None })
+        tls!(static FOO: UnsafeCell<Option<Foo>> = UnsafeCell { value: None });
 
         let (tx, rx) = channel();
         spawn(move || unsafe {
@@ -441,8 +441,8 @@ mod tests {
     fn circular() {
         struct S1;
         struct S2;
-        tls!(static K1: UnsafeCell<Option<S1>> = UnsafeCell { value: None })
-        tls!(static K2: UnsafeCell<Option<S2>> = UnsafeCell { value: None })
+        tls!(static K1: UnsafeCell<Option<S1>> = UnsafeCell { value: None });
+        tls!(static K2: UnsafeCell<Option<S2>> = UnsafeCell { value: None });
         static mut HITS: uint = 0;
 
         impl Drop for S1 {
@@ -477,7 +477,7 @@ mod tests {
             }
         }
 
-        Thread::start(move || {
+        Thread::spawn(move || {
             drop(S1);
         }).join();
     }
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn self_referential() {
         struct S1;
-        tls!(static K1: UnsafeCell<Option<S1>> = UnsafeCell { value: None })
+        tls!(static K1: UnsafeCell<Option<S1>> = UnsafeCell { value: None });
 
         impl Drop for S1 {
             fn drop(&mut self) {
@@ -493,7 +493,7 @@ mod tests {
             }
         }
 
-        Thread::start(move || unsafe {
+        Thread::spawn(move || unsafe {
             *K1.get().unwrap().get() = Some(S1);
         }).join();
     }
@@ -501,8 +501,8 @@ mod tests {
     #[test]
     fn dtors_in_dtors_in_dtors() {
         struct S1(Sender<()>);
-        tls!(static K1: UnsafeCell<Option<S1>> = UnsafeCell { value: None })
-        tls!(static K2: UnsafeCell<Option<Foo>> = UnsafeCell { value: None })
+        tls!(static K1: UnsafeCell<Option<S1>> = UnsafeCell { value: None });
+        tls!(static K2: UnsafeCell<Option<Foo>> = UnsafeCell { value: None });
 
         impl Drop for S1 {
             fn drop(&mut self) {

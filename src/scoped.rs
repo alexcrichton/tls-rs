@@ -55,7 +55,7 @@ macro_rules! scoped_tls(
     (static $name:ident: $t:ty) => (
         scoped_tls_inner!(static $name: $t)
     );
-)
+);
 
 impl<T> Key<T> {
     /// Insert a value into this scoped TLS slot for a duration of a closure.
@@ -162,7 +162,7 @@ mod imp {
                 }
             };
         );
-    )
+    );
 
     impl<T> KeyInner<T> {
         #[doc(hidden)]
@@ -194,7 +194,7 @@ mod imp {
                 }
             };
         );
-    )
+    );
 
     impl<T> KeyInner<T> {
         #[doc(hidden)]
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn smoke() {
-        scoped_tls!(static BAR: uint)
+        scoped_tls!(static BAR: uint);
 
         BAR.with(|slot| {
             assert_eq!(slot, None);
@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     fn cell_allowed() {
-        scoped_tls!(static BAR: Cell<uint>)
+        scoped_tls!(static BAR: Cell<uint>);
 
         BAR.set(&Cell::new(1), || {
             BAR.with(|slot| {
